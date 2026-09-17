@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "journal-mqtt"
+version = "0.1.0"
+description = "Stream JSON messages from systemd-journald to MQTT"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "jq>=1.8",
+  "paho-mqtt>=2.1",
+  "systemd-python>=235",
+]
+
+[project.scripts]
+journal-mqtt = "journal_mqtt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

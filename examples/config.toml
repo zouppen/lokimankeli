@@ -1,0 +1,38 @@
+[journal]
+# Select exactly one local journal scope and service.
+scope = "system"
+unit = "victron-ble.service"
+
+[mqtt]
+host = "mqtt.example.net"
+port = 8883
+client_id = "journal-mqtt-victron"
+username = "journal-mqtt"
+password = "replace-me"
+keepalive = 60
+
+[mqtt.tls]
+enabled = true
+# Omit ca_file to use the operating system trust store.
+# ca_file = "/etc/ssl/certs/private-ca.pem"
+# cert_file = "/path/to/client.pem"
+# key_file = "/path/to/client-key.pem"
+
+[routing]
+# The topic filter must produce exactly one string from the original object.
+topic_filter = '"victron-ble/" + .address'
+
+# This filter controls the complete JSON payload. It may emit zero or more values.
+# $timestamp is Unix milliseconds and $event_id identifies the journal record.
+content_filter = '''
+del(.sensitive_field)
+| .timestamp = $timestamp
+| .event_id = $event_id
+'''
+
+# Give every bridge instance its own exact checkpoint topic.
+state_topic = "journal-mqtt/state/victron"
+
+[security]
+# Use a stable, random value of at least 32 characters. Do not reuse it elsewhere.
+event_id_key = "replace-with-a-random-value-at-least-32-characters"

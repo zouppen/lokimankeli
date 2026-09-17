@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+import threading
+import unittest
+from datetime import UTC, datetime
+
+from journal_mqtt.config import Config, MQTTConfig
+from journal_mqtt.filters import FilterError, TransformedRecord
+from journal_mqtt.service import BridgeService, ServiceError, timestamp_milliseconds
+
+
+def config() -> Config:
+    return Config(
+        journal_scope="system",
+        journal_unit="producer.service",
+        topic_filter=".topic",
+        content_filter=".",
+        state_topic="state/producer",
+        event_id_key="0123456789abcdef0123456789abcdef",
+        mqtt=MQTTConfig(host="broker", client_id="bridge"),
+    )
+
+
+class FakeJournal:
+    def __init__(self, entries=()):
+        self.entries = list(entries)
+        self.seeked = None
+
+    def seek_after(self, cursor):
+        self.seeked = cursor
+
+    def follow(self, stop):
+        yield from self.entries
+
+
+class FakeMQTT:
+    def __init__(self, stored="stored-cursor"):
+        self.stored = stored
+        self.connected = False
+        self.closed = False
+        self.calls = []
+
+    def connect(self):
+        self.connected = True
+
+    def load_cursor(self, topic):
+        self.calls.append(("load", topic))
+        return self.stored
+
+    def publish(self, topic, payload, *, retain, stop):
+        self.calls.append(("publish", topic, payload, retain))
+
+    def save_cursor(self, topic, cursor, stop):
+        self.calls.append(("state", topic, cursor))
+
+    def close(self):
+        self.closed = True
+
+
+class FakeFilters:
+    def __init__(self, payloads=None, error=None):
+        self.payloads = payloads if payloads is not None else ['{"ok":true}']
+        self.error = error
+        self.inputs = []
+
+    def transform(self, message, timestamp, identifier):
+        self.inputs.append((message, timestamp, identifier))
+        if self.error:
+            raise self.error
+        return TransformedRecord("telemetry/device", self.payloads)
+
+
+class ServiceTests(unittest.TestCase):
+    def test_datetime_timestamp_is_milliseconds(self):
+        value = datetime(2026, 9, 17, 12, 0, 3, 647774, tzinfo=UTC)
+        self.assertEqual(timestamp_milliseconds(value), 1789646403647)
+        self.assertEqual(timestamp_milliseconds("1789646403647774"), 1789646403647)
+
+    def test_multiple_payloads_are_published_before_checkpoint(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1789646403647774",
+            "MESSAGE": '{"device":"a"}',
+        }
+        mqtt = FakeMQTT()
+        filters = FakeFilters(["1", "2"])
+        service = BridgeService(
+            config(), threading.Event(), journal=FakeJournal(), mqtt=mqtt, filters=filters
+        )
+        service._process(entry)
+        self.assertEqual(
+            mqtt.calls,
+            [
+                ("publish", "telemetry/device", "1", False),
+                ("publish", "telemetry/device", "2", False),
+                ("state", "state/producer", "cursor-2"),
+            ],
+        )
+        self.assertEqual(filters.inputs[0][1], 1789646403647)
+        self.assertEqual(len(filters.inputs[0][2]), 43)
+
+    def test_zero_outputs_only_checkpoint(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT()
+        service = BridgeService(
+            config(), threading.Event(), journal=FakeJournal(), mqtt=mqtt, filters=FakeFilters([])
+        )
+        service._process(entry)
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-2")])
+
+    def test_filter_error_is_checkpointed(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT()
+        service = BridgeService(
+            config(),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(error=FilterError("bad")),
+        )
+        service._process(entry)
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-2")])
+
+    def test_override_is_stored_before_follow(self):
+        journal = FakeJournal()
+        mqtt = FakeMQTT(stored=None)
+        service = BridgeService(
+            config(), threading.Event(), journal=journal, mqtt=mqtt, filters=FakeFilters()
+        )
+        service.run("initial-cursor")
+        self.assertEqual(journal.seeked, "initial-cursor")
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "initial-cursor")])
+        self.assertTrue(mqtt.closed)
+
+    def test_missing_state_refuses_start(self):
+        mqtt = FakeMQTT(stored=None)
+        service = BridgeService(
+            config(), threading.Event(), journal=FakeJournal(), mqtt=mqtt, filters=FakeFilters()
+        )
+        with self.assertRaises(ServiceError):
+            service.run()
+        self.assertTrue(mqtt.closed)
+
+
+if __name__ == "__main__":
+    unittest.main()
