@@ -94,15 +94,11 @@ choice and restrict its permissions. The program deliberately has no default
 config path:
 
 ```console
-lokimankeli --config /path/to/bridge.toml --cursor 's=...;i=...;b=...;m=...;t=...;x=...'
+lokimankeli --config /path/to/bridge.toml
 ```
 
-`--cursor` is required for the first run because no retained checkpoint exists
-yet. It identifies the last already-handled record; processing begins with the
-next matching record. Obtain a suitable `__CURSOR` from `journalctl -o json`.
-The override is validated and saved before delivery begins. Later starts omit
-`--cursor` and resume from retained MQTT state. The bridge refuses to guess a
-position if the retained state is missing or invalid.
+The initial checkpoint and recovery procedure is described under
+[Service deployment](#service-deployment).
 
 The config file contains the MQTT password and HMAC key. Use mode `0600`. The
 system service reads its root-owned configuration through a systemd credential;
@@ -110,17 +106,67 @@ the user service reads its configuration directly as the current user.
 
 ## Service deployment
 
-Example system and user units are under [`systemd/`](systemd/). The system unit
-requires systemd 247 or newer and uses `DynamicUser` with membership in
-`systemd-journal`; no persistent service account is needed. Its root-owned
-configuration is loaded from `/etc/lokimankeli-victron.toml` into the protected
-credential directory. Optional `LoadCredential` examples in the unit can place
-TLS files in the same directory, allowing `ca_file`, `cert_file`, and `key_file`
-to use the relative names shown in the example configuration.
+Alternative system and user units are under [`systemd/`](systemd/). Select one
+and normally run a single bridge instance. Multiple instances require separate
+MQTT client IDs, state topics, and systemd state directories.
+
+The system unit requires systemd 247 or newer and uses `DynamicUser`
+with membership in `systemd-journal`; no persistent service account is
+needed. Its root-owned configuration is loaded from
+`/etc/lokimankeli.toml` into the protected credential
+directory. Optional `LoadCredential` examples in the unit can place
+TLS files in the same directory, allowing `ca_file`, `cert_file`, and
+`key_file` to use the relative names shown in the example
+configuration.
 
 The user unit reads its configuration from
-`%h/.config/lokimankeli/victron.toml`. It reads only the current user journal
+`%h/.config/lokimankeli/config.toml`. It reads only the current user journal
 and should set `journal.scope = "user"`.
+
+The selected unit creates a private `lokimankeli` state directory. A file named
+`start-position` in that directory overrides retained MQTT state for the next
+start. Its contents must be either `now` or one global journal cursor. `now`
+means the newest entry in the configured system or user journal, without unit
+or transport filters.
+
+On the first system-service start, the missing checkpoint makes the process
+fail and systemd schedules a retry. That first attempt also creates the state
+directory. Supply the position before the next retry:
+
+```console
+sudo systemctl start lokimankeli.service
+printf '%s\n' now | sudo tee /var/lib/lokimankeli/start-position >/dev/null
+```
+
+To recover from a purged checkpoint or deliberately replay from another
+position, write the request and restart the running service:
+
+```console
+printf '%s\n' 's=...;i=...;b=...;m=...;t=...;x=...' \
+  | sudo tee /var/lib/lokimankeli/start-position >/dev/null
+sudo systemctl restart lokimankeli.service
+```
+
+Obtain cursors from `journalctl -o json`. Cursors are global within the
+configured journal scope and need not belong to the selected unit.
+
+For the user unit, obtain the state root with `systemd-path user-state`. As with
+the system unit, the first failed start creates the directory and the automatic
+retry consumes the request:
+
+```console
+systemctl --user start lokimankeli.service
+user_state=$(systemd-path user-state)
+printf '%s\n' now >"$user_state/lokimankeli/start-position"
+```
+
+Before saving `now`, the bridge replaces it atomically with the concrete tail
+cursor. It removes `start-position` only after MQTT acknowledges the retained
+checkpoint and before telemetry delivery starts. Once `now` has been resolved,
+later failures leave the concrete, retryable request in place.
+
+For a direct non-systemd invocation, set `STATE_DIRECTORY` to a private
+directory containing the same `start-position` file before starting the bridge.
 
 The MQTT identity needs permission to publish telemetry and read/write its
 configured state topic. Telemetry-only consumers should be denied access to
@@ -143,7 +189,9 @@ same output group may therefore be replayed after the problem is corrected.
 
 Configurations from the initial two-filter design must replace
 `topic_filter` and `content_filter` with `publish_filter`. The program reports a
-specific migration error if either legacy key is present.
+specific migration error if either legacy key is present. The former
+`lokimankeli --cursor` startup override has been replaced by the one-shot
+`start-position` state file.
 
 ## License
 

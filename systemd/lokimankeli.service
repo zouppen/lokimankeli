@@ -7,7 +7,9 @@ Wants=network-online.target
 Type=simple
 DynamicUser=yes
 SupplementaryGroups=systemd-journal
-LoadCredential=config.toml:/etc/lokimankeli-victron.toml
+StateDirectory=lokimankeli
+StateDirectoryMode=0700
+LoadCredential=config.toml:/etc/lokimankeli.toml
 # The TLS credentials below are optional. Uncomment those referenced by relative
 # ca_file, cert_file, or key_file paths in config.toml.
 # LoadCredential=ca.pem:/etc/lokimankeli/ca.pem

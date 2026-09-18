@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import tempfile
 import threading
 import unittest
 from datetime import UTC, datetime
+from pathlib import Path
 
 from lokimankeli.config import Config, MQTTConfig
 from lokimankeli.filters import FilterError, Publication
+from lokimankeli.journal import JournalError
 from lokimankeli.mqtt import MQTTError, PublishResult
 from lokimankeli.service import BridgeService, ServiceError, timestamp_milliseconds
 
@@ -28,21 +31,26 @@ class FakeJournal:
     def __init__(self, entries=()):
         self.entries = list(entries)
         self.seeked = None
+        self.latest = "latest-cursor"
 
     def seek_after(self, cursor):
         self.seeked = cursor
+
+    def latest_cursor(self):
+        return self.latest
 
     def follow(self, stop):
         yield from self.entries
 
 
 class FakeMQTT:
-    def __init__(self, stored="stored-cursor", results=None):
+    def __init__(self, stored="stored-cursor", results=None, state_error=None):
         self.stored = stored
         self.connected = False
         self.closed = False
         self.calls = []
         self.results = list(results or [])
+        self.state_error = state_error
 
     def connect(self):
         self.connected = True
@@ -58,6 +66,8 @@ class FakeMQTT:
         return PublishResult("Success", False, False)
 
     def save_cursor(self, topic, cursor, stop):
+        if self.state_error is not None:
+            raise self.state_error
         self.calls.append(("state", topic, cursor))
 
     def close(self):
@@ -290,25 +300,76 @@ class ServiceTests(unittest.TestCase):
             service._process(entry)
         self.assertFalse(any(call[0] == "state" for call in mqtt.calls))
 
-    def test_override_is_stored_before_follow(self):
-        journal = FakeJournal()
-        mqtt = FakeMQTT(stored=None)
-        service = BridgeService(
-            config(), threading.Event(), journal=journal, mqtt=mqtt, filters=FakeFilters()
-        )
-        service.run("initial-cursor")
-        self.assertEqual(journal.seeked, "initial-cursor")
-        self.assertEqual(mqtt.calls, [("state", "state/producer", "initial-cursor")])
-        self.assertTrue(mqtt.closed)
-
     def test_missing_state_refuses_start(self):
         mqtt = FakeMQTT(stored=None)
         service = BridgeService(
             config(), threading.Event(), journal=FakeJournal(), mqtt=mqtt, filters=FakeFilters()
         )
-        with self.assertRaises(ServiceError):
+        with self.assertRaisesRegex(ServiceError, "start-position"):
             service.run()
         self.assertTrue(mqtt.closed)
+
+    def test_explicit_start_position_overrides_retained_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "start-position")
+            path.write_text("chosen-cursor\n")
+            journal = FakeJournal()
+            mqtt = FakeMQTT(stored="ignored-cursor")
+            service = BridgeService(
+                config(),
+                threading.Event(),
+                journal=journal,
+                mqtt=mqtt,
+                filters=FakeFilters(),
+                state_directory=Path(directory),
+            )
+            service.run()
+            self.assertEqual(journal.seeked, "chosen-cursor")
+            self.assertNotIn(("load", "state/producer"), mqtt.calls)
+            self.assertIn(("state", "state/producer", "chosen-cursor"), mqtt.calls)
+            self.assertFalse(path.exists())
+
+    def test_now_is_resolved_before_failed_checkpoint_is_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "start-position")
+            path.write_text("now\n")
+            journal = FakeJournal()
+            mqtt = FakeMQTT(state_error=MQTTError("checkpoint failed"))
+            service = BridgeService(
+                config(),
+                threading.Event(),
+                journal=journal,
+                mqtt=mqtt,
+                filters=FakeFilters(),
+                state_directory=Path(directory),
+            )
+            with self.assertRaisesRegex(MQTTError, "checkpoint failed"):
+                service.run()
+            self.assertEqual(journal.seeked, "latest-cursor")
+            self.assertEqual(path.read_text(), "latest-cursor\n")
+            self.assertTrue(mqtt.closed)
+
+    def test_invalid_start_position_is_left_for_correction(self):
+        class RejectingJournal(FakeJournal):
+            def seek_after(self, cursor):
+                raise JournalError("cursor unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "start-position")
+            path.write_text("bad-cursor\n")
+            mqtt = FakeMQTT()
+            service = BridgeService(
+                config(),
+                threading.Event(),
+                journal=RejectingJournal(),
+                mqtt=mqtt,
+                filters=FakeFilters(),
+                state_directory=Path(directory),
+            )
+            with self.assertRaisesRegex(JournalError, "unavailable"):
+                service.run()
+            self.assertEqual(path.read_text(), "bad-cursor\n")
+            self.assertFalse(mqtt.connected)
 
 
 if __name__ == "__main__":

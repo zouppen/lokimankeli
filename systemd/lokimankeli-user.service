@@ -5,7 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/lokimankeli --config %h/.config/lokimankeli/victron.toml
+StateDirectory=lokimankeli
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/lokimankeli --config %h/.config/lokimankeli/config.toml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes

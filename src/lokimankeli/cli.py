@@ -11,6 +11,7 @@ from .filters import FilterError
 from .journal import JournalError
 from .mqtt import MQTTError
 from .service import BridgeService, ServiceError
+from .start_position import StartPositionError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,9 +19,6 @@ def build_parser() -> argparse.ArgumentParser:
         prog="lokimankeli", description="Stream JSON journal messages to MQTT"
     )
     parser.add_argument("--config", required=True, help="path to the TOML configuration file")
-    parser.add_argument(
-        "--cursor", help="override checkpoint; processing starts after this journal cursor"
-    )
     return parser
 
 
@@ -38,8 +36,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_config(args.config)
-        BridgeService(config, stop).run(args.cursor)
-    except (ConfigError, FilterError, JournalError, MQTTError, ServiceError) as exc:
+        BridgeService(config, stop).run()
+    except (
+        ConfigError,
+        FilterError,
+        JournalError,
+        MQTTError,
+        ServiceError,
+        StartPositionError,
+    ) as exc:
         logging.getLogger(__name__).error("%s", exc)
         return 1
     except KeyboardInterrupt:

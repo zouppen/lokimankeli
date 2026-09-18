@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from .config import Config
 from .filters import FilterError, JQPublishFilter, event_id
 from .journal import JournalSource
 from .mqtt import MQTTBridge, MQTTError
+from .start_position import START_POSITION_FILENAME, StartPosition
 
 LOG = logging.getLogger(__name__)
 
@@ -36,12 +39,21 @@ class BridgeService:
         journal: JournalSource | None = None,
         mqtt: MQTTBridge | None = None,
         filters: JQPublishFilter | None = None,
+        state_directory: Path | None = None,
     ):
         self.config = config
         self.stop = stop
         self.journal = journal or JournalSource(config.journal_scope, config.journal_unit)
         self.mqtt = mqtt or MQTTBridge(config.mqtt)
         self.filters = filters or JQPublishFilter(config.publish_filter, config.state_topic)
+        if state_directory is None:
+            configured_state_directory = os.environ.get("STATE_DIRECTORY")
+            if configured_state_directory and ":" in configured_state_directory:
+                raise ServiceError("STATE_DIRECTORY must contain exactly one directory")
+            state_directory = (
+                Path(configured_state_directory) if configured_state_directory else None
+            )
+        self.state_directory = state_directory
 
     def _checkpoint(self, cursor: str) -> None:
         self.mqtt.save_cursor(self.config.state_topic, cursor, self.stop)
@@ -105,19 +117,31 @@ class BridgeService:
                 )
         self._checkpoint(cursor)
 
-    def run(self, cursor_override: str | None = None) -> None:
+    def run(self) -> None:
+        request = StartPosition.load(self.state_directory)
+        if request is not None:
+            cursor = request.value
+            if cursor == "now":
+                cursor = self.journal.latest_cursor()
+                request = request.replace(cursor)
+            self.journal.seek_after(cursor)
+
         self.mqtt.connect()
         try:
-            if cursor_override is not None:
-                cursor = cursor_override
-                self.journal.seek_after(cursor)
+            if request is not None:
                 self._checkpoint(cursor)
-                LOG.info("validated and stored command-line journal cursor")
+                request.consume()
+                LOG.info("stored and consumed one-shot journal start position")
             else:
                 cursor = self.mqtt.load_cursor(self.config.state_topic)
                 if cursor is None:
+                    location = (
+                        self.state_directory / START_POSITION_FILENAME
+                        if self.state_directory is not None
+                        else "a StateDirectory start-position file"
+                    )
                     raise ServiceError(
-                        "no retained checkpoint exists; provide --cursor for the first start"
+                        f"no retained checkpoint exists; create {location} and restart"
                     )
                 self.journal.seek_after(cursor)
                 LOG.info("resuming after retained journal cursor")
