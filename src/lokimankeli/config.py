@@ -43,6 +43,7 @@ class MQTTConfig:
 
 @dataclass(frozen=True)
 class Config:
+    log_level: str
     journal_scope: str
     routes: tuple[RouteConfig, ...]
     event_id_key: str
@@ -60,6 +61,13 @@ def _table(data: dict[str, Any], name: str) -> dict[str, Any]:
     value = data.get(name)
     if not isinstance(value, dict):
         raise ConfigError(f"missing or invalid [{name}] table")
+    return value
+
+
+def _optional_table(data: dict[str, Any], name: str) -> dict[str, Any]:
+    value = data.get(name, {})
+    if not isinstance(value, dict):
+        raise ConfigError(f"invalid [{name}] table")
     return value
 
 
@@ -108,7 +116,7 @@ def _validate_topic(topic: str, name: str) -> None:
         raise ConfigError(f"{name} must encode to between 1 and 65535 UTF-8 bytes")
 
 
-def load_config(path: str | os.PathLike[str]) -> Config:
+def read_config(path: str | os.PathLike[str]) -> dict[str, Any]:
     config_path = Path(path)
     if not config_path.is_file():
         raise ConfigError(f"configuration is not a readable regular file: {config_path}")
@@ -117,6 +125,21 @@ def load_config(path: str | os.PathLike[str]) -> Config:
             data = tomllib.load(handle)
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"cannot read configuration {config_path}: {exc}") from exc
+    return data
+
+
+def config_log_level(data: dict[str, Any]) -> str:
+    general = _optional_table(data, "general")
+    value = general.get("log_level", "info")
+    choices = frozenset({"debug", "info", "warning", "error", "critical"})
+    if not isinstance(value, str) or value not in choices:
+        expected = ", ".join(repr(choice) for choice in sorted(choices))
+        raise ConfigError(f"general.log_level must be one of {expected}")
+    return value
+
+
+def parse_config(data: dict[str, Any]) -> Config:
+    log_level = config_log_level(data)
 
     journal = _table(data, "journal")
     mqtt_data = _table(data, "mqtt")
@@ -191,8 +214,13 @@ def load_config(path: str | os.PathLike[str]) -> Config:
     _validate_topic(mqtt.state_topic, "mqtt.state_topic")
 
     return Config(
+        log_level=log_level,
         journal_scope=scope,
         routes=tuple(routes),
         event_id_key=event_id_key,
         mqtt=mqtt,
     )
+
+
+def load_config(path: str | os.PathLike[str]) -> Config:
+    return parse_config(read_config(path))

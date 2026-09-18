@@ -15,6 +15,7 @@ from lokimankeli.service import BridgeService, ServiceError, timestamp_milliseco
 
 def config(strictness: str = "warn", filter_strictness: str = "warn") -> Config:
     return Config(
+        log_level="info",
         journal_scope="system",
         routes=(
             RouteConfig(
@@ -138,6 +139,69 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual(filters.inputs[0][1], 1789646403647)
         self.assertEqual(len(filters.inputs[0][2]), 43)
+
+    def test_debug_log_reports_route_topics_and_broker_acceptance(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        filters = FakeFilters(
+            [
+                Publication("victron/mac/rssi", "1"),
+                Publication("victron/mac/data", "2"),
+            ]
+        )
+        service = BridgeService(
+            config(),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=FakeMQTT(),
+            filters=filters,
+        )
+        with self.assertLogs("lokimankeli.service", "DEBUG") as logs:
+            service._process(entry)
+        output = " ".join(logs.output)
+        self.assertIn("producer.service", output)
+        self.assertIn("victron/mac/rssi", output)
+        self.assertIn("victron/mac/data", output)
+        self.assertEqual(output.count("broker accepted publication"), 2)
+
+    def test_debug_log_reports_empty_filter_output(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        service = BridgeService(
+            config(),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=FakeMQTT(),
+            filters=FakeFilters([]),
+        )
+        with self.assertLogs("lokimankeli.service", "DEBUG") as logs:
+            service._process(entry)
+        self.assertIn("not published anywhere", " ".join(logs.output))
+
+    def test_debug_log_reports_broker_rejection_even_when_ignored(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT(results=[PublishResult("Not authorized", True, False)])
+        service = BridgeService(
+            config("ignore"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(),
+        )
+        with self.assertLogs("lokimankeli.service", "DEBUG") as logs:
+            service._process(entry)
+        self.assertIn("broker rejected", " ".join(logs.output))
+        self.assertIn("Not authorized", " ".join(logs.output))
 
     def test_entries_are_dispatched_to_their_unit_filter(self):
         producer_filter = FakeFilters([Publication("producer", "1")])
@@ -271,8 +335,13 @@ class ServiceTests(unittest.TestCase):
             mqtt=mqtt,
             filters=FakeFilters(),
         )
-        with self.assertRaisesRegex(MQTTError, "no matching subscribers"):
+        with (
+            self.assertLogs("lokimankeli.service", "DEBUG") as logs,
+            self.assertRaisesRegex(MQTTError, "no matching subscribers"),
+        ):
             service._process(entry)
+        self.assertIn("accepted publication", " ".join(logs.output))
+        self.assertIn("no matching subscribers", " ".join(logs.output))
         self.assertFalse(any(call[0] == "state" for call in mqtt.calls))
 
     def test_publication_strictness_overrides_configured_policy(self):

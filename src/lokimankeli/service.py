@@ -110,12 +110,29 @@ class BridgeService:
             self._checkpoint(cursor)
             return
 
+        if publications:
+            LOG.debug(
+                "message received from %r; publishing to topics: %s",
+                unit,
+                ", ".join(repr(publication.topic) for publication in publications),
+            )
+        else:
+            LOG.debug(
+                "message received from %r; not published anywhere because jq produced no output",
+                unit,
+            )
+
         for publication in publications:
             strictness = publication.strictness or self.config.mqtt.strictness
             result = self.mqtt.publish(
                 publication.topic, publication.payload, retain=False, stop=self.stop
             )
             if result.rejected:
+                LOG.debug(
+                    "broker rejected publication to %r: %s",
+                    publication.topic,
+                    result.reason,
+                )
                 detail = (
                     f"MQTT broker rejected publication to {publication.topic!r}: {result.reason}"
                 )
@@ -123,13 +140,18 @@ class BridgeService:
                     raise MQTTError(detail)
                 if strictness == "warn":
                     LOG.warning("%s; skipping", detail)
-            elif (
-                result.no_matching_subscribers
-                and strictness == "require-sub"
-            ):
-                raise MQTTError(
-                    f"MQTT broker reported no matching subscribers for {publication.topic!r}"
+            elif result.no_matching_subscribers:
+                LOG.debug(
+                    "broker accepted publication to %r with no matching subscribers",
+                    publication.topic,
                 )
+                if strictness == "require-sub":
+                    raise MQTTError(
+                        "MQTT broker reported no matching subscribers for "
+                        f"{publication.topic!r}"
+                    )
+            else:
+                LOG.debug("broker accepted publication to %r", publication.topic)
         self._checkpoint(cursor)
 
     def run(self) -> None:

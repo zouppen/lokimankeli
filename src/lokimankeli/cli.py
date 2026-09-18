@@ -6,7 +6,7 @@ import signal
 import sys
 import threading
 
-from .config import ConfigError, load_config
+from .config import ConfigError, config_log_level, parse_config, read_config
 from .filters import FilterError
 from .journal import JournalError
 from .mqtt import MQTTError
@@ -35,7 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, request_stop)
 
     try:
-        config = load_config(args.config)
+        config_data = read_config(args.config)
+        logging.getLogger().setLevel(config_log_level(config_data).upper())
+        config = parse_config(config_data)
         BridgeService(config, stop).run()
     except (
         ConfigError,

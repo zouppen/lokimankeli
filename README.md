@@ -103,6 +103,10 @@ config path:
 lokimankeli --config /path/to/bridge.toml
 ```
 
+Set `[general] log_level = "debug"` to log each message's source unit, jq
+routing decision, and MQTT acknowledgement outcome. The default is `info`.
+Debug logs include topic names but not payloads, cursors, or event IDs.
+
 The initial checkpoint and recovery procedure is described under
 [Service deployment](#service-deployment).
 

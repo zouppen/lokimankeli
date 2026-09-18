@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lokimankeli.config import ConfigError, load_config
+from lokimankeli.config import ConfigError, config_log_level, load_config, read_config
 
 VALID = '''
 [journal]
@@ -37,6 +37,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_loads_required_configuration(self) -> None:
         config = load_config(self.write(VALID))
+        self.assertEqual(config.log_level, "info")
         self.assertEqual(config.journal_scope, "system")
         self.assertEqual(config.mqtt.port, 1883)
         self.assertEqual([route.unit for route in config.routes], ["producer.service", "audit.service"])
@@ -48,6 +49,22 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.routes[1].filter_strictness, "fail")
         self.assertEqual(config.mqtt.strictness, "warn")
         self.assertEqual(config.mqtt.state_topic, "state/producer")
+
+    def test_accepts_log_levels(self) -> None:
+        for value in ("debug", "info", "warning", "error", "critical"):
+            with self.subTest(value=value):
+                configured = f'[general]\nlog_level = "{value}"\n' + VALID
+                self.assertEqual(load_config(self.write(configured)).log_level, value)
+
+    def test_rejects_invalid_log_level(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "general.log_level"):
+            load_config(self.write('[general]\nlog_level = "verbose"\n' + VALID))
+
+    def test_log_level_can_be_processed_before_remaining_config(self) -> None:
+        data = read_config(self.write('[general]\nlog_level = "debug"\n'))
+        self.assertEqual(config_log_level(data), "debug")
+        with self.assertRaisesRegex(ConfigError, "journal"):
+            load_config(self.write('[general]\nlog_level = "debug"\n'))
 
     def test_requires_strictness(self) -> None:
         with self.assertRaisesRegex(ConfigError, "strictness"):

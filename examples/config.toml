@@ -1,3 +1,7 @@
+[general]
+# "debug", "info", "warning", "error", or "critical".
+log_level = "info"
+
 [journal]
 # Select one local journal scope. Routes below select services within it.
 scope = "system"
