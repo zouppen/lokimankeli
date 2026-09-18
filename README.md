@@ -71,16 +71,23 @@ The override is validated and saved before delivery begins. Later starts omit
 `--cursor` and resume from retained MQTT state. The bridge refuses to guess a
 position if the retained state is missing or invalid.
 
-The config file contains the MQTT password and HMAC key. Use mode `0640` with a
-dedicated service group for a system service, or `0600` for a user service.
+The config file contains the MQTT password and HMAC key. Use mode `0600`. The
+system service reads its root-owned configuration through a systemd credential;
+the user service reads its configuration directly as the current user.
 
 ## Service deployment
 
-Example system and user units are under [`systemd/`](systemd/). They contain
-illustrative explicit config paths; edit `ExecStart` to the path chosen for each
-instance. For the system unit, create the unprivileged `lokimankeli` account
-and grant it membership in `systemd-journal`. A user unit reads only the current
-user journal and should set `journal.scope = "user"`.
+Example system and user units are under [`systemd/`](systemd/). The system unit
+requires systemd 247 or newer and uses `DynamicUser` with membership in
+`systemd-journal`; no persistent service account is needed. Its root-owned
+configuration is loaded from `/etc/lokimankeli-victron.toml` into the protected
+credential directory. Optional `LoadCredential` examples in the unit can place
+TLS files in the same directory, allowing `ca_file`, `cert_file`, and `key_file`
+to use the relative names shown in the example configuration.
+
+The user unit reads its configuration from
+`%h/.config/lokimankeli/victron.toml`. It reads only the current user journal
+and should set `journal.scope = "user"`.
 
 The MQTT identity needs permission to publish telemetry and read/write its
 configured state topic. Telemetry-only consumers should be denied access to

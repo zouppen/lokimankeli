@@ -14,9 +14,10 @@ keepalive = 60
 [mqtt.tls]
 enabled = true
 # Omit ca_file to use the operating system trust store.
-# ca_file = "/etc/ssl/certs/private-ca.pem"
-# cert_file = "/path/to/client.pem"
-# key_file = "/path/to/client-key.pem"
+# The system service can provide these relative paths with LoadCredential.
+# ca_file = "ca.pem"
+# cert_file = "client.crt"
+# key_file = "client.key"
 
 [routing]
 # Each result defines one complete MQTT publication. This example splits

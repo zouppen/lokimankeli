@@ -5,10 +5,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=lokimankeli
-Group=lokimankeli
+DynamicUser=yes
 SupplementaryGroups=systemd-journal
-ExecStart=/usr/local/bin/lokimankeli --config /etc/lokimankeli-victron.toml
+LoadCredential=config.toml:/etc/lokimankeli-victron.toml
+# The TLS credentials below are optional. Uncomment those referenced by relative
+# ca_file, cert_file, or key_file paths in config.toml.
+# LoadCredential=ca.pem:/etc/lokimankeli/ca.pem
+# LoadCredential=client.crt:/etc/lokimankeli/client.crt
+# LoadCredential=client.key:/etc/lokimankeli/client.key
+WorkingDirectory=%d
+ExecStart=/usr/local/bin/lokimankeli --config config.toml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes
