@@ -56,9 +56,15 @@ installing dependencies from PyPI, building `systemd-python` may additionally
 require `libsystemd-dev`, `pkg-config`, a compiler, and Python development
 headers.
 
-Install the project with your normal Python packaging workflow, then copy
-[`examples/config.toml`](examples/config.toml) to a location of your choice and
-restrict its permissions. The program deliberately has no default config path:
+For example, install the project from the repository root with pip:
+
+```console
+python3 -m pip install .
+```
+
+Then copy [`examples/config.toml`](examples/config.toml) to a location of your
+choice and restrict its permissions. The program deliberately has no default
+config path:
 
 ```console
 lokimankeli --config /path/to/bridge.toml --cursor 's=...;i=...;b=...;m=...;t=...;x=...'
