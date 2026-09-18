@@ -1,18 +1,24 @@
 # lokimankeli
 
-`lokimankeli` follows the stdout records of one systemd service, decodes each
-`MESSAGE` as a JSON object, transforms it with jq, and publishes it to MQTT.
+`lokimankeli` follows the stdout records of configured systemd services,
+decodes each `MESSAGE` as a JSON object, transforms it with jq, and publishes
+it to MQTT.
 
 This is basically cleaner implementation of the sender filters in my old tool
 [systemdb](https://github.com/zouppen/systemdb/blob/master/send/examples/heppa).
 
 ## Message flow
 
-The required `publish_filter` jq program receives the original JSON object and
-emits zero or more MQTT publication descriptors. Each result must contain a
-`topic` string and a `payload` JSON value, and may contain a `strictness`
-override. This lets one journal entry produce different payloads and delivery
-policies on different topics.
+Each `[[route]]` selects one systemd unit and defines a required
+`publish_filter` jq program. One journal reader follows all routed units in the
+configured journal scope and dispatches each record to the filter for its
+unit. Unit names must be unique.
+
+The filter receives the original JSON object and emits zero or more MQTT
+publication descriptors. Each result must contain a `topic` string and a
+`payload` JSON value, and may contain a `strictness` override. This lets one
+journal entry produce different payloads and delivery policies on different
+topics.
 
 The filter also receives `$timestamp_ms`, the journal receive time in Unix
 milliseconds, and `$event_id`, an unpadded base64url HMAC-SHA256 of the journal
@@ -65,8 +71,8 @@ of the retained checkpoint is always fatal regardless of this setting.
 Each jq output may override the configured policy for that publication with a
 `strictness` field. Omit the field to inherit `mqtt.strictness`.
 
-The required `routing.filter_strictness` setting controls jq evaluation errors
-and invalid publication descriptors for individual journal entries:
+Each route's required `filter_strictness` setting controls jq evaluation errors
+and invalid publication descriptors for that route's journal entries:
 
 - `ignore` silently skips and checkpoints the entry.
 - `warn` logs a warning, then skips and checkpoints the entry.
@@ -107,8 +113,9 @@ the user service reads its configuration directly as the current user.
 ## Service deployment
 
 Alternative system and user units are under [`systemd/`](systemd/). Select one
-and normally run a single bridge instance. Multiple instances require separate
-MQTT client IDs, state topics, and systemd state directories.
+and normally run a single bridge instance, adding a `[[route]]` for every
+service it should follow. Separate bridge instances require distinct MQTT
+client IDs, state topics, and systemd state directories.
 
 The system unit requires systemd 247 or newer and uses `DynamicUser`
 with membership in `systemd-journal`; no persistent service account is
@@ -148,7 +155,7 @@ sudo systemctl restart lokimankeli.service
 ```
 
 Obtain cursors from `journalctl -o json`. Cursors are global within the
-configured journal scope and need not belong to the selected unit.
+configured journal scope and need not belong to a routed unit.
 
 For the user unit, obtain the state root with `systemd-path user-state`. As with
 the system unit, the first failed start creates the directory and the automatic
@@ -175,21 +182,23 @@ untrusted network.
 
 ## Failure semantics
 
-The cursor advances only after all derived MQTT publications are acknowledged.
-A crash between telemetry acknowledgement and checkpoint acknowledgement may
-replay the complete output group; `$event_id` remains stable. Jq runtime
-failures and invalid publication descriptors are handled according to
-`routing.filter_strictness`. An intentional zero-output result checkpoints
-normally. Invalid JSON and invalid journal timestamps continue to be warned,
-skipped, and checkpointed.
+All routes share one cursor. It advances only after all publications derived
+from the current journal entry are acknowledged. A fatal route or publication
+error therefore prevents later records from every routed unit from being
+processed until the error is corrected. A crash between telemetry
+acknowledgement and checkpoint acknowledgement may replay the complete output
+group; `$event_id` remains stable. Jq runtime failures and invalid publication
+descriptors are handled according to that route's `filter_strictness`. An
+intentional zero-output result checkpoints normally. Invalid JSON and invalid
+journal timestamps continue to be warned, skipped, and checkpointed.
 
 With `mqtt.strictness = "fail"` or `"require-sub"`, a rejected
 publication similarly leaves the cursor unchanged. Publications earlier in the
 same output group may therefore be replayed after the problem is corrected.
 
-Configurations from the initial two-filter design must replace
-`topic_filter` and `content_filter` with `publish_filter`. The program reports a
-specific migration error if either legacy key is present. The former
+The multi-route schema is a breaking change: `journal.unit` moves to each
+`[[route]]`, each route contains its own `publish_filter` and
+`filter_strictness`, and `state_topic` belongs under `[mqtt]`. The former
 `lokimankeli --cursor` startup override has been replaced by the one-shot
 `start-position` state file.
 

@@ -18,10 +18,15 @@ class FakeReader:
         self.matches.append(match)
 
     def _visible(self):
-        entries = self.entries
+        alternatives = {}
         for match in self.matches:
-            entries = [entry for entry in entries if all(entry.get(k) == v for k, v in match.items())]
-        return entries
+            for field, value in match.items():
+                alternatives.setdefault(field, set()).add(value)
+        return [
+            entry
+            for entry in self.entries
+            if all(entry.get(field) in values for field, values in alternatives.items())
+        ]
 
     def seek_cursor(self, cursor):
         all_index = next(
@@ -88,11 +93,48 @@ def entry(cursor, unit="other.service", transport="journal"):
 class JournalTests(unittest.TestCase):
     def source(self, entries):
         module = FakeJournalModule(entries)
-        return JournalSource("system", "producer.service", _journal_module=module), module
+        return (
+            JournalSource(
+                "system",
+                ("producer.service", "audit.service"),
+                _journal_module=module,
+            ),
+            module,
+        )
 
     def test_latest_cursor_ignores_delivery_filters(self):
         source, _module = self.source([entry("one"), entry("global-tail")])
         self.assertEqual(source.latest_cursor(), "global-tail")
+
+    def test_reader_matches_all_configured_units_and_stdout_only(self):
+        entries = [
+            entry("producer", "producer.service", "stdout"),
+            entry("audit", "audit.service", "stdout"),
+            entry("wrong-transport", "producer.service", "journal"),
+            entry("wrong-unit", "other.service", "stdout"),
+        ]
+        source, _module = self.source(entries)
+        source.seek_after("producer")
+        stop = threading.Event()
+        following = source.follow(stop)
+        self.assertEqual(next(following), entries[1])
+        stop.set()
+        self.assertEqual(list(following), [])
+
+    def test_entry_unit_uses_scope_specific_field(self):
+        system_source, _module = self.source([])
+        self.assertEqual(
+            system_source.entry_unit({"_SYSTEMD_UNIT": "producer.service"}),
+            "producer.service",
+        )
+        user_module = FakeJournalModule([])
+        user_source = JournalSource(
+            "user", ("producer.service",), _journal_module=user_module
+        )
+        self.assertEqual(
+            user_source.entry_unit({"_SYSTEMD_USER_UNIT": "producer.service"}),
+            "producer.service",
+        )
 
     def test_latest_cursor_rejects_empty_scope(self):
         source, _module = self.source([])

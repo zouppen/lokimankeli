@@ -30,6 +30,7 @@ class MQTTConfig:
     host: str
     client_id: str
     strictness: str
+    state_topic: str
     port: int = 1883
     username: str | None = None
     password: str | None = None
@@ -43,18 +44,31 @@ class MQTTConfig:
 @dataclass(frozen=True)
 class Config:
     journal_scope: str
-    journal_unit: str
-    publish_filter: str
-    filter_strictness: str
-    state_topic: str
+    routes: tuple[RouteConfig, ...]
     event_id_key: str
     mqtt: MQTTConfig
+
+
+@dataclass(frozen=True)
+class RouteConfig:
+    unit: str
+    publish_filter: str
+    filter_strictness: str
 
 
 def _table(data: dict[str, Any], name: str) -> dict[str, Any]:
     value = data.get(name)
     if not isinstance(value, dict):
         raise ConfigError(f"missing or invalid [{name}] table")
+    return value
+
+
+def _table_array(data: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    value = data.get(name)
+    if not isinstance(value, list) or not value or not all(
+        isinstance(item, dict) for item in value
+    ):
+        raise ConfigError(f"missing or invalid [[{name}]] tables")
     return value
 
 
@@ -106,24 +120,31 @@ def load_config(path: str | os.PathLike[str]) -> Config:
 
     journal = _table(data, "journal")
     mqtt_data = _table(data, "mqtt")
-    routing = _table(data, "routing")
+    route_data = _table_array(data, "route")
     security = _table(data, "security")
 
     scope = _string(journal, "scope")
     if scope not in {"system", "user"}:
         raise ConfigError("journal.scope must be 'system' or 'user'")
-    unit = _string(journal, "unit")
 
-    legacy_filters = [name for name in ("topic_filter", "content_filter") if name in routing]
-    if legacy_filters:
-        names = ", ".join(f"routing.{name}" for name in legacy_filters)
-        raise ConfigError(f"{names} replaced by routing.publish_filter")
-    publish_filter = _string(routing, "publish_filter")
-    filter_strictness = _choice(
-        routing, "filter_strictness", FILTER_STRICTNESS_VALUES
-    )
-    state_topic = _string(routing, "state_topic")
-    _validate_topic(state_topic, "routing.state_topic")
+    routes: list[RouteConfig] = []
+    seen_units: set[str] = set()
+    for index, route in enumerate(route_data):
+        unit = _string(route, "unit")
+        if "\x00" in unit or "\n" in unit or "\r" in unit:
+            raise ConfigError(f"route {index} unit contains an invalid character")
+        if unit in seen_units:
+            raise ConfigError(f"duplicate route unit: {unit!r}")
+        seen_units.add(unit)
+        routes.append(
+            RouteConfig(
+                unit=unit,
+                publish_filter=_string(route, "publish_filter"),
+                filter_strictness=_choice(
+                    route, "filter_strictness", FILTER_STRICTNESS_VALUES
+                ),
+            )
+        )
 
     event_id_key = _string(security, "event_id_key")
     if len(event_id_key) < 32:
@@ -155,6 +176,7 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         host=_string(mqtt_data, "host"),
         client_id=_string(mqtt_data, "client_id"),
         strictness=_choice(mqtt_data, "strictness", PUBLISH_STRICTNESS_VALUES),
+        state_topic=_string(mqtt_data, "state_topic"),
         port=_number(mqtt_data, "port", 1883, integer=True),
         username=username,
         password=password,
@@ -166,13 +188,11 @@ def load_config(path: str | os.PathLike[str]) -> Config:
     )
     if mqtt.port > 65535:
         raise ConfigError("mqtt.port must not exceed 65535")
+    _validate_topic(mqtt.state_topic, "mqtt.state_topic")
 
     return Config(
         journal_scope=scope,
-        journal_unit=unit,
-        publish_filter=publish_filter,
-        filter_strictness=filter_strictness,
-        state_topic=state_topic,
+        routes=tuple(routes),
         event_id_key=event_id_key,
         mqtt=mqtt,
     )

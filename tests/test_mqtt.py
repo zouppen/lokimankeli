@@ -58,7 +58,11 @@ def bridge_with_reasons(*reasons):
         error_string=lambda value: f"error {value}",
     )
     bridge._config = MQTTConfig(
-        host="broker", client_id="bridge", strictness="warn", publish_timeout=0.01
+        host="broker",
+        client_id="bridge",
+        strictness="warn",
+        state_topic="state/bridge",
+        publish_timeout=0.01,
     )
     bridge._connected = threading.Event()
     bridge._connected.set()
@@ -75,7 +79,14 @@ class MQTTTests(unittest.TestCase):
 
         client = mock.Mock()
         with mock.patch.object(mqtt, "Client", return_value=client) as constructor:
-            MQTTBridge(MQTTConfig(host="broker", client_id="bridge", strictness="warn"))
+            MQTTBridge(
+                MQTTConfig(
+                    host="broker",
+                    client_id="bridge",
+                    strictness="warn",
+                    state_topic="state/bridge",
+                )
+            )
         self.assertEqual(constructor.call_args.kwargs["protocol"], mqtt.MQTTv5)
 
     def test_publish_returns_success_reason(self):

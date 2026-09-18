@@ -9,15 +9,19 @@ from lokimankeli.config import ConfigError, load_config
 VALID = '''
 [journal]
 scope = "system"
-unit = "producer.service"
 [mqtt]
 host = "broker"
 client_id = "bridge"
 strictness = "warn"
-[routing]
+state_topic = "state/producer"
+[[route]]
+unit = "producer.service"
 filter_strictness = "warn"
 publish_filter = '{topic: ("events/" + .id), payload: .}'
-state_topic = "state/producer"
+[[route]]
+unit = "audit.service"
+filter_strictness = "fail"
+publish_filter = '{topic: "audit", payload: .}'
 [security]
 event_id_key = "0123456789abcdef0123456789abcdef"
 '''
@@ -35,9 +39,15 @@ class ConfigTests(unittest.TestCase):
         config = load_config(self.write(VALID))
         self.assertEqual(config.journal_scope, "system")
         self.assertEqual(config.mqtt.port, 1883)
-        self.assertEqual(config.publish_filter, '{topic: ("events/" + .id), payload: .}')
-        self.assertEqual(config.filter_strictness, "warn")
+        self.assertEqual([route.unit for route in config.routes], ["producer.service", "audit.service"])
+        self.assertEqual(
+            config.routes[0].publish_filter,
+            '{topic: ("events/" + .id), payload: .}',
+        )
+        self.assertEqual(config.routes[0].filter_strictness, "warn")
+        self.assertEqual(config.routes[1].filter_strictness, "fail")
         self.assertEqual(config.mqtt.strictness, "warn")
+        self.assertEqual(config.mqtt.state_topic, "state/producer")
 
     def test_requires_strictness(self) -> None:
         with self.assertRaisesRegex(ConfigError, "strictness"):
@@ -61,7 +71,8 @@ class ConfigTests(unittest.TestCase):
                     'filter_strictness = "warn"', f'filter_strictness = "{value}"'
                 )
                 self.assertEqual(
-                    load_config(self.write(configured)).filter_strictness, value
+                    load_config(self.write(configured)).routes[0].filter_strictness,
+                    value,
                 )
 
     def test_rejects_invalid_filter_strictness(self) -> None:
@@ -72,6 +83,18 @@ class ConfigTests(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(ConfigError, "filter_strictness"):
                     load_config(self.write(configured))
+
+    def test_requires_at_least_one_route(self) -> None:
+        without_routes = VALID.split("[[route]]", 1)[0] + '''
+[security]
+event_id_key = "0123456789abcdef0123456789abcdef"
+'''
+        with self.assertRaisesRegex(ConfigError, "route"):
+            load_config(self.write(without_routes))
+
+    def test_rejects_duplicate_route_units(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "duplicate"):
+            load_config(self.write(VALID.replace('unit = "audit.service"', 'unit = "producer.service"')))
 
     def test_accepts_strictness_values(self) -> None:
         for value in ("ignore", "warn", "fail", "require-sub"):
@@ -108,14 +131,6 @@ class ConfigTests(unittest.TestCase):
     def test_rejects_state_wildcard(self) -> None:
         with self.assertRaisesRegex(ConfigError, "wildcard"):
             load_config(self.write(VALID.replace("state/producer", "state/+")))
-
-    def test_rejects_legacy_filter_configuration_with_migration_hint(self) -> None:
-        legacy = VALID.replace(
-            'publish_filter = \'{topic: ("events/" + .id), payload: .}\'',
-            'topic_filter = \'"events/" + .id\'\ncontent_filter = "."',
-        )
-        with self.assertRaisesRegex(ConfigError, "replaced by routing.publish_filter"):
-            load_config(self.write(legacy))
 
     def test_requires_a_regular_file(self) -> None:
         with self.assertRaises(ConfigError):

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import Config
+from .config import Config, RouteConfig
 from .filters import FilterError, JQPublishFilter, event_id
 from .journal import JournalSource
 from .mqtt import MQTTBridge, MQTTError
@@ -38,14 +38,20 @@ class BridgeService:
         *,
         journal: JournalSource | None = None,
         mqtt: MQTTBridge | None = None,
-        filters: JQPublishFilter | None = None,
+        filters: dict[str, JQPublishFilter] | None = None,
         state_directory: Path | None = None,
     ):
         self.config = config
         self.stop = stop
-        self.journal = journal or JournalSource(config.journal_scope, config.journal_unit)
+        self.routes = {route.unit: route for route in config.routes}
+        self.journal = journal or JournalSource(
+            config.journal_scope, tuple(self.routes)
+        )
         self.mqtt = mqtt or MQTTBridge(config.mqtt)
-        self.filters = filters or JQPublishFilter(config.publish_filter, config.state_topic)
+        self.filters = filters or {
+            route.unit: JQPublishFilter(route.publish_filter, config.mqtt.state_topic)
+            for route in config.routes
+        }
         if state_directory is None:
             configured_state_directory = os.environ.get("STATE_DIRECTORY")
             if configured_state_directory and ":" in configured_state_directory:
@@ -56,13 +62,18 @@ class BridgeService:
         self.state_directory = state_directory
 
     def _checkpoint(self, cursor: str) -> None:
-        self.mqtt.save_cursor(self.config.state_topic, cursor, self.stop)
+        self.mqtt.save_cursor(self.config.mqtt.state_topic, cursor, self.stop)
 
     def _process(self, entry: dict[str, Any]) -> None:
         cursor = entry.get("__CURSOR")
         if not isinstance(cursor, str) or not cursor:
             LOG.warning("skipping journal entry without a cursor")
             return
+
+        unit = self.journal.entry_unit(entry)
+        route: RouteConfig | None = self.routes.get(unit) if unit is not None else None
+        if route is None:
+            raise ServiceError(f"journal entry has no configured route for unit {unit!r}")
 
         raw = entry.get("MESSAGE")
         try:
@@ -86,12 +97,16 @@ class BridgeService:
 
         identifier = event_id(self.config.event_id_key, cursor)
         try:
-            publications = self.filters.transform(message, timestamp_ms, identifier)
+            publications = self.filters[route.unit].transform(
+                message, timestamp_ms, identifier
+            )
         except FilterError as exc:
-            if self.config.filter_strictness == "fail":
+            if route.filter_strictness == "fail":
                 raise
-            if self.config.filter_strictness == "warn":
-                LOG.warning("skipping journal entry rejected by jq: %s", exc)
+            if route.filter_strictness == "warn":
+                LOG.warning(
+                    "skipping journal entry from %s rejected by jq: %s", unit, exc
+                )
             self._checkpoint(cursor)
             return
 
@@ -133,7 +148,7 @@ class BridgeService:
                 request.consume()
                 LOG.info("stored and consumed one-shot journal start position")
             else:
-                cursor = self.mqtt.load_cursor(self.config.state_topic)
+                cursor = self.mqtt.load_cursor(self.config.mqtt.state_topic)
                 if cursor is None:
                     location = (
                         self.state_directory / START_POSITION_FILENAME

@@ -10,7 +10,9 @@ class JournalError(RuntimeError):
 
 
 class JournalSource:
-    def __init__(self, scope: str, unit: str, *, _journal_module: Any | None = None):
+    def __init__(
+        self, scope: str, units: tuple[str, ...], *, _journal_module: Any | None = None
+    ):
         if _journal_module is None:
             try:
                 from systemd import journal
@@ -31,16 +33,22 @@ class JournalSource:
 
         self._journal = journal
         self._flags = flags
+        self._unit_field = unit_field
         self._pending: dict[str, Any] | None = None
         try:
             self._reader = self._new_reader()
-            self._reader.add_match(**{unit_field: unit})
+            for unit in units:
+                self._reader.add_match(**{unit_field: unit})
             self._reader.add_match(_TRANSPORT="stdout")
         except Exception as exc:
             raise JournalError("cannot open or filter the selected journal") from exc
 
     def _new_reader(self) -> Any:
         return self._journal.Reader(flags=self._flags)
+
+    def entry_unit(self, entry: dict[str, Any]) -> str | None:
+        value = entry.get(self._unit_field)
+        return value if isinstance(value, str) and value else None
 
     def validate_cursor(self, cursor: str) -> None:
         try:

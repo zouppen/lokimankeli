@@ -1,7 +1,6 @@
 [journal]
-# Select exactly one local journal scope and service.
+# Select one local journal scope. Routes below select services within it.
 scope = "system"
-unit = "victron-ble.service"
 
 [mqtt]
 host = "mqtt.example.net"
@@ -13,6 +12,8 @@ keepalive = 60
 # Baseline for every publication: "ignore", "warn", "fail", or
 # "require-sub". A jq output can override this with its own strictness.
 strictness = "warn"
+# Give the bridge one exact checkpoint topic shared by all routes.
+state_topic = "lokimankeli/state"
 
 [mqtt.tls]
 enabled = true
@@ -22,7 +23,8 @@ enabled = true
 # cert_file = "client.crt"
 # key_file = "client.key"
 
-[routing]
+[[route]]
+unit = "victron-ble.service"
 # Behavior when jq evaluation or publication descriptor validation fails for
 # an entry: "ignore", "warn", or "fail".
 filter_strictness = "warn"
@@ -47,8 +49,15 @@ publish_filter = '''
 }
 '''
 
-# Give every bridge instance its own exact checkpoint topic.
-state_topic = "lokimankeli/state/victron"
+[[route]]
+unit = "environment.service"
+filter_strictness = "warn"
+publish_filter = '''
+{
+  topic: "environment/measurements",
+  payload: (. + {timestamp_ms: $timestamp_ms, event_id: $event_id})
+}
+'''
 
 [security]
 # Use a stable, random value of at least 32 characters. Do not reuse it elsewhere.

@@ -6,7 +6,7 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
-from lokimankeli.config import Config, MQTTConfig
+from lokimankeli.config import Config, MQTTConfig, RouteConfig
 from lokimankeli.filters import FilterError, Publication
 from lokimankeli.journal import JournalError
 from lokimankeli.mqtt import MQTTError, PublishResult
@@ -16,13 +16,24 @@ from lokimankeli.service import BridgeService, ServiceError, timestamp_milliseco
 def config(strictness: str = "warn", filter_strictness: str = "warn") -> Config:
     return Config(
         journal_scope="system",
-        journal_unit="producer.service",
-        publish_filter='{topic: "telemetry/device", payload: .}',
-        filter_strictness=filter_strictness,
-        state_topic="state/producer",
+        routes=(
+            RouteConfig(
+                unit="producer.service",
+                publish_filter='{topic: "telemetry/device", payload: .}',
+                filter_strictness=filter_strictness,
+            ),
+            RouteConfig(
+                unit="audit.service",
+                publish_filter='{topic: "telemetry/audit", payload: .}',
+                filter_strictness="warn",
+            ),
+        ),
         event_id_key="0123456789abcdef0123456789abcdef",
         mqtt=MQTTConfig(
-            host="broker", client_id="bridge", strictness=strictness
+            host="broker",
+            client_id="bridge",
+            strictness=strictness,
+            state_topic="state/producer",
         ),
     )
 
@@ -38,6 +49,9 @@ class FakeJournal:
 
     def latest_cursor(self):
         return self.latest
+
+    def entry_unit(self, entry):
+        return entry.get("_SYSTEMD_UNIT", "producer.service")
 
     def follow(self, stop):
         yield from self.entries
@@ -74,8 +88,11 @@ class FakeMQTT:
         self.closed = True
 
 
-class FakeFilters:
+class FakeFilters(dict):
     def __init__(self, publications=None, error=None):
+        super().__init__()
+        self["producer.service"] = self
+        self["audit.service"] = self
         self.publications = (
             publications
             if publications is not None
@@ -121,6 +138,47 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual(filters.inputs[0][1], 1789646403647)
         self.assertEqual(len(filters.inputs[0][2]), 43)
+
+    def test_entries_are_dispatched_to_their_unit_filter(self):
+        producer_filter = FakeFilters([Publication("producer", "1")])
+        audit_filter = FakeFilters([Publication("audit", "2")])
+        filters = {
+            "producer.service": producer_filter,
+            "audit.service": audit_filter,
+        }
+        mqtt = FakeMQTT()
+        service = BridgeService(
+            config(), threading.Event(), journal=FakeJournal(), mqtt=mqtt, filters=filters
+        )
+        service._process(
+            {
+                "__CURSOR": "cursor-audit",
+                "__REALTIME_TIMESTAMP": "1000",
+                "_SYSTEMD_UNIT": "audit.service",
+                "MESSAGE": '{"kind":"audit"}',
+            }
+        )
+        self.assertEqual(producer_filter.inputs, [])
+        self.assertEqual(audit_filter.inputs[0][0], {"kind": "audit"})
+        self.assertIn(("publish", "audit", "2", False), mqtt.calls)
+
+    def test_entry_from_unconfigured_unit_is_fatal_without_checkpoint(self):
+        mqtt = FakeMQTT()
+        service = BridgeService(
+            config(),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(),
+        )
+        with self.assertRaisesRegex(ServiceError, "unconfigured.service"):
+            service._process(
+                {
+                    "__CURSOR": "cursor-other",
+                    "_SYSTEMD_UNIT": "unconfigured.service",
+                }
+            )
+        self.assertFalse(any(call[0] == "state" for call in mqtt.calls))
 
     def test_zero_outputs_only_checkpoint(self):
         entry = {
@@ -263,6 +321,30 @@ class ServiceTests(unittest.TestCase):
             service._process(entry)
         self.assertIn("bad", " ".join(logs.output))
         self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-2")])
+
+    def test_filter_strictness_is_selected_by_route(self):
+        entry = {
+            "__CURSOR": "cursor-audit",
+            "__REALTIME_TIMESTAMP": "1000",
+            "_SYSTEMD_UNIT": "audit.service",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT()
+        failing_filter = FakeFilters(error=FilterError("bad audit record"))
+        service = BridgeService(
+            config(filter_strictness="fail"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters={
+                "producer.service": FakeFilters(),
+                "audit.service": failing_filter,
+            },
+        )
+        with self.assertLogs("lokimankeli.service", "WARNING") as logs:
+            service._process(entry)
+        self.assertIn("audit.service", " ".join(logs.output))
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-audit")])
 
     def test_filter_error_is_ignored_and_checkpointed(self):
         entry = {
