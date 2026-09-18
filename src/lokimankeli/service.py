@@ -66,7 +66,7 @@ class BridgeService:
 
         realtime = entry.get("__REALTIME_TIMESTAMP")
         try:
-            timestamp = timestamp_milliseconds(realtime)
+            timestamp_ms = timestamp_milliseconds(realtime)
         except (TypeError, ValueError):
             LOG.warning("skipping journal entry without a valid realtime timestamp")
             self._checkpoint(cursor)
@@ -74,7 +74,7 @@ class BridgeService:
 
         identifier = event_id(self.config.event_id_key, cursor)
         try:
-            publications = self.filters.transform(message, timestamp, identifier)
+            publications = self.filters.transform(message, timestamp_ms, identifier)
         except FilterError as exc:
             LOG.warning("skipping journal entry rejected by jq: %s", exc)
             self._checkpoint(cursor)

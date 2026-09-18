@@ -51,7 +51,7 @@ class JQPublishFilter:
         try:
             wrapper = (
                 ". as $__lokimankeli | "
-                "$__lokimankeli.timestamp as $timestamp | "
+                "$__lokimankeli.timestamp_ms as $timestamp_ms | "
                 "$__lokimankeli.event_id as $event_id | "
                 "$__lokimankeli.message | ("
                 + publish_filter
@@ -61,8 +61,10 @@ class JQPublishFilter:
         except Exception as exc:
             raise FilterError(f"cannot compile jq filter: {exc}") from exc
 
-    def transform(self, message: dict[str, Any], timestamp: int, identifier: str) -> list[Publication]:
-        context = {"message": message, "timestamp": timestamp, "event_id": identifier}
+    def transform(
+        self, message: dict[str, Any], timestamp_ms: int, identifier: str
+    ) -> list[Publication]:
+        context = {"message": message, "timestamp_ms": timestamp_ms, "event_id": identifier}
         try:
             values = self._filter.input_value(context).all()
         except Exception as exc:

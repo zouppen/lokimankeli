@@ -14,7 +14,7 @@ class JQFilterTests(unittest.TestCase):
             '''
             {
               topic: ("devices/" + .address + "/details"),
-              payload: (del(.secret) | .ts = $timestamp | .id = $event_id)
+              payload: (del(.secret) | .ts_ms = $timestamp_ms | .id = $event_id)
             },
             {
               topic: ("devices/" + .address + "/summary"),
@@ -29,7 +29,7 @@ class JQFilterTests(unittest.TestCase):
         self.assertEqual(result[0].topic, "devices/a/b/details")
         self.assertEqual(
             json.loads(result[0].payload),
-            {"address": "a/b", "value": 3, "ts": 1234, "id": "event-id"},
+            {"address": "a/b", "value": 3, "ts_ms": 1234, "id": "event-id"},
         )
         self.assertEqual(result[1].topic, "devices/a/b/summary")
         self.assertEqual(json.loads(result[1].payload), {"summary": 3, "id": "event-id"})
@@ -37,6 +37,13 @@ class JQFilterTests(unittest.TestCase):
     def test_zero_outputs_are_allowed(self) -> None:
         publish_filter = JQPublishFilter("empty", "state/bridge")
         self.assertEqual(publish_filter.transform({}, 1234, "event-id"), [])
+
+    def test_old_timestamp_variable_is_not_supported(self) -> None:
+        with self.assertRaises(FilterError):
+            JQPublishFilter(
+                '{topic: "events", payload: {timestamp: $timestamp}}',
+                "state/bridge",
+            )
 
     def test_duplicate_topics_are_allowed(self) -> None:
         publish_filter = JQPublishFilter(

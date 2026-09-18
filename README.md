@@ -11,15 +11,17 @@ emits zero or more MQTT publication descriptors. Each result must contain
 exactly a `topic` string and a `payload` JSON value. This lets one journal entry
 produce different payloads on different topics.
 
-The filter also receives `$timestamp`, the journal receive time in Unix
+The filter also receives `$timestamp_ms`, the journal receive time in Unix
 milliseconds, and `$event_id`, an unpadded base64url HMAC-SHA256 of the journal
 cursor. Multiple publications from one journal record share an event ID.
+The older `$timestamp` variable is not defined; filters must use
+`$timestamp_ms` so the unit is explicit.
 
 ```jq
 {
   topic: "victron/\(.address)/rssi",
   payload: {
-    observed_at: $timestamp,
+    observed_at_ms: $timestamp_ms,
     source_event: $event_id,
     rssi: .rssi
   }
@@ -29,7 +31,7 @@ cursor. Multiple publications from one journal record share an event ID.
   payload: (
     .payload
     | del(.private)
-    | .observed_at = $timestamp
+    | .observed_at_ms = $timestamp_ms
     | .source_event = $event_id
   )
 }
