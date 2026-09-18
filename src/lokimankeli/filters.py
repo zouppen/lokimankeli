@@ -7,6 +7,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from .config import PUBLISH_STRICTNESS_VALUES
+
 
 class FilterError(ValueError):
     pass
@@ -38,6 +40,7 @@ def validate_publish_topic(topic: str, state_topic: str) -> None:
 class Publication:
     topic: str
     payload: str
+    strictness: str | None = None
 
 
 class JQPublishFilter:
@@ -70,9 +73,16 @@ class JQPublishFilter:
 
         publications: list[Publication] = []
         for index, value in enumerate(values):
-            if not isinstance(value, dict) or set(value) != {"topic", "payload"}:
+            required = {"topic", "payload"}
+            allowed = required | {"strictness"}
+            if (
+                not isinstance(value, dict)
+                or not required.issubset(value)
+                or not set(value).issubset(allowed)
+            ):
                 raise FilterError(
-                    f"publish filter output {index} must contain exactly topic and payload"
+                    f"publish filter output {index} must contain topic and payload, "
+                    "with optional strictness"
                 )
             topic = value["topic"]
             if not isinstance(topic, str):
@@ -88,5 +98,14 @@ class JQPublishFilter:
                 payload.encode("utf-8")
             except (TypeError, ValueError) as exc:
                 raise FilterError(f"publish filter output {index} payload is not valid JSON") from exc
-            publications.append(Publication(topic, payload))
+            strictness = value.get("strictness")
+            if "strictness" in value and (
+                not isinstance(strictness, str)
+                or strictness not in PUBLISH_STRICTNESS_VALUES
+            ):
+                raise FilterError(
+                    f"publish filter output {index} strictness must be one of "
+                    + ", ".join(repr(item) for item in sorted(PUBLISH_STRICTNESS_VALUES))
+                )
+            publications.append(Publication(topic, payload, strictness))
         return publications

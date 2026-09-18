@@ -11,6 +11,11 @@ class ConfigError(ValueError):
     pass
 
 
+PUBLISH_STRICTNESS_VALUES = frozenset(
+    {"ignore", "warn", "fail", "require-subscriber"}
+)
+
+
 @dataclass(frozen=True)
 class TLSConfig:
     enabled: bool = False
@@ -23,6 +28,7 @@ class TLSConfig:
 class MQTTConfig:
     host: str
     client_id: str
+    strictness: str
     port: int = 1883
     username: str | None = None
     password: str | None = None
@@ -67,6 +73,14 @@ def _number(
     if isinstance(value, bool) or not isinstance(value, expected) or value <= 0:
         raise ConfigError(f"{name} must be a positive {'integer' if integer else 'number'}")
     return int(value) if integer else float(value)
+
+
+def _choice(table: dict[str, Any], name: str, choices: frozenset[str]) -> str:
+    value = table.get(name)
+    if not isinstance(value, str) or value not in choices:
+        expected = ", ".join(repr(choice) for choice in sorted(choices))
+        raise ConfigError(f"{name} must be one of {expected}")
+    return value
 
 
 def _validate_topic(topic: str, name: str) -> None:
@@ -135,6 +149,7 @@ def load_config(path: str | os.PathLike[str]) -> Config:
     mqtt = MQTTConfig(
         host=_string(mqtt_data, "host"),
         client_id=_string(mqtt_data, "client_id"),
+        strictness=_choice(mqtt_data, "strictness", PUBLISH_STRICTNESS_VALUES),
         port=_number(mqtt_data, "port", 1883, integer=True),
         username=username,
         password=password,

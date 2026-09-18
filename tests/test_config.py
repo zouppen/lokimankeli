@@ -13,6 +13,7 @@ unit = "producer.service"
 [mqtt]
 host = "broker"
 client_id = "bridge"
+strictness = "warn"
 [routing]
 publish_filter = '{topic: ("events/" + .id), payload: .}'
 state_topic = "state/producer"
@@ -34,6 +35,33 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.journal_scope, "system")
         self.assertEqual(config.mqtt.port, 1883)
         self.assertEqual(config.publish_filter, '{topic: ("events/" + .id), payload: .}')
+        self.assertEqual(config.mqtt.strictness, "warn")
+
+    def test_requires_strictness(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "strictness"):
+            load_config(self.write(VALID.replace('strictness = "warn"\n', "")))
+
+    def test_accepts_strictness_values(self) -> None:
+        for value in ("ignore", "warn", "fail", "require-subscriber"):
+            with self.subTest(value=value):
+                configured = VALID.replace(
+                    'strictness = "warn"',
+                    f'strictness = "{value}"',
+                )
+                self.assertEqual(
+                    load_config(self.write(configured)).mqtt.strictness,
+                    value,
+                )
+
+    def test_rejects_invalid_strictness(self) -> None:
+        for value in ('"loud"', "true"):
+            with self.subTest(value=value):
+                configured = VALID.replace(
+                    'strictness = "warn"',
+                    f'strictness = {value}',
+                )
+                with self.assertRaisesRegex(ConfigError, "strictness"):
+                    load_config(self.write(configured))
 
     def test_rejects_unknown_scope(self) -> None:
         with self.assertRaisesRegex(ConfigError, "scope"):

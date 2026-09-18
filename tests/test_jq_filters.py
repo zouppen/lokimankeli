@@ -54,6 +54,28 @@ class JQFilterTests(unittest.TestCase):
         self.assertEqual([item.topic for item in result], ["events", "events"])
         self.assertEqual([item.payload for item in result], ["1", "null"])
 
+    def test_publication_strictness_is_optional(self) -> None:
+        publish_filter = JQPublishFilter(
+            '''
+            {topic: "rssi", payload: ., strictness: "warn"},
+            {topic: "data", payload: .}
+            ''',
+            "state/bridge",
+        )
+        result = publish_filter.transform({}, 1234, "event-id")
+        self.assertEqual(result[0].strictness, "warn")
+        self.assertIsNone(result[1].strictness)
+
+    def test_rejects_invalid_publication_strictness(self) -> None:
+        for value in ('"unknown"', "null", "true", "{}"):
+            with self.subTest(value=value):
+                publish_filter = JQPublishFilter(
+                    f'{{topic: "events", payload: {{}}, strictness: {value}}}',
+                    "state/bridge",
+                )
+                with self.assertRaisesRegex(FilterError, "strictness"):
+                    publish_filter.transform({}, 1234, "event-id")
+
     def test_invalid_descriptor_rejects_the_complete_result(self) -> None:
         cases = {
             "not an object": '"events"',

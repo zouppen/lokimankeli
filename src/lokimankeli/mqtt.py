@@ -5,6 +5,7 @@ import logging
 import ssl
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from .config import MQTTConfig
@@ -14,6 +15,13 @@ LOG = logging.getLogger(__name__)
 
 class MQTTError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class PublishResult:
+    reason: str
+    rejected: bool
+    no_matching_subscribers: bool
 
 
 class MQTTBridge:
@@ -32,15 +40,19 @@ class MQTTBridge:
         self._state_topic: str | None = None
         self._connect_error: str | None = None
         self._subscription_error: str | None = None
+        self._publish_lock = threading.Lock()
+        self._publish_reasons: dict[int, Any] = {}
+        self._abandoned_publish_ids: set[int] = set()
 
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=config.client_id,
-            protocol=mqtt.MQTTv311,
+            protocol=mqtt.MQTTv5,
         )
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
+        self._client.on_publish = self._on_publish
         self._client.on_subscribe = self._on_subscribe
         self._client.reconnect_delay_set(min_delay=1, max_delay=30)
         if config.username is not None:
@@ -83,6 +95,20 @@ class MQTTBridge:
         if message.topic == self._state_topic and message.retain:
             self._state_payload = bytes(message.payload)
             self._state_event.set()
+
+    def _on_publish(
+        self,
+        client: Any,
+        userdata: Any,
+        mid: int,
+        reason_code: Any,
+        properties: Any,
+    ) -> None:
+        with self._publish_lock:
+            if mid in self._abandoned_publish_ids:
+                self._abandoned_publish_ids.remove(mid)
+            else:
+                self._publish_reasons[mid] = reason_code
 
     def connect(self) -> None:
         try:
@@ -129,7 +155,25 @@ class MQTTBridge:
             if stop.is_set():
                 raise MQTTError("stopped while waiting for MQTT reconnection")
 
-    def publish(self, topic: str, payload: str, *, retain: bool, stop: threading.Event) -> None:
+    def _publish_result(self, mid: int) -> PublishResult | None:
+        with self._publish_lock:
+            reason_code = self._publish_reasons.pop(mid, None)
+        if reason_code is None:
+            return None
+        return PublishResult(
+            reason=str(reason_code),
+            rejected=getattr(reason_code, "is_failure", False),
+            no_matching_subscribers=reason_code == 0x10,
+        )
+
+    def _abandon_publish(self, mid: int) -> None:
+        with self._publish_lock:
+            if self._publish_reasons.pop(mid, None) is None:
+                self._abandoned_publish_ids.add(mid)
+
+    def publish(
+        self, topic: str, payload: str, *, retain: bool, stop: threading.Event
+    ) -> PublishResult:
         delay = 1.0
         while not stop.is_set():
             self._wait_connected(stop)
@@ -141,7 +185,11 @@ class MQTTBridge:
                     LOG.warning("MQTT acknowledgement wait failed; retrying: %s", exc)
                 else:
                     if info.is_published():
-                        return
+                        result = self._publish_result(info.mid)
+                        if result is not None:
+                            return result
+                        LOG.warning("MQTT acknowledgement had no reason code; retrying")
+                self._abandon_publish(info.mid)
             else:
                 LOG.warning("MQTT publish failed; retrying: %s", self._mqtt.error_string(info.rc))
             stop.wait(delay)
@@ -150,7 +198,11 @@ class MQTTBridge:
 
     def save_cursor(self, topic: str, cursor: str, stop: threading.Event) -> None:
         payload = json.dumps({"version": 1, "cursor": cursor}, separators=(",", ":"))
-        self.publish(topic, payload, retain=True, stop=stop)
+        result = self.publish(topic, payload, retain=True, stop=stop)
+        if result.rejected:
+            raise MQTTError(
+                f"MQTT broker rejected checkpoint publication to {topic!r}: {result.reason}"
+            )
 
     def close(self) -> None:
         try:

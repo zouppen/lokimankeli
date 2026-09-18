@@ -9,7 +9,7 @@ from typing import Any
 from .config import Config
 from .filters import FilterError, JQPublishFilter, event_id
 from .journal import JournalSource
-from .mqtt import MQTTBridge
+from .mqtt import MQTTBridge, MQTTError
 
 LOG = logging.getLogger(__name__)
 
@@ -81,9 +81,25 @@ class BridgeService:
             return
 
         for publication in publications:
-            self.mqtt.publish(
+            strictness = publication.strictness or self.config.mqtt.strictness
+            result = self.mqtt.publish(
                 publication.topic, publication.payload, retain=False, stop=self.stop
             )
+            if result.rejected:
+                detail = (
+                    f"MQTT broker rejected publication to {publication.topic!r}: {result.reason}"
+                )
+                if strictness in {"fail", "require-subscriber"}:
+                    raise MQTTError(detail)
+                if strictness == "warn":
+                    LOG.warning("%s; skipping", detail)
+            elif (
+                result.no_matching_subscribers
+                and strictness == "require-subscriber"
+            ):
+                raise MQTTError(
+                    f"MQTT broker reported no matching subscribers for {publication.topic!r}"
+                )
         self._checkpoint(cursor)
 
     def run(self, cursor_override: str | None = None) -> None:

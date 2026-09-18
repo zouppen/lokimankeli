@@ -9,9 +9,10 @@ This is basically cleaner implementation of the sender filters in my old tool
 ## Message flow
 
 The required `publish_filter` jq program receives the original JSON object and
-emits zero or more MQTT publication descriptors. Each result must contain
-exactly a `topic` string and a `payload` JSON value. This lets one journal entry
-produce different payloads on different topics.
+emits zero or more MQTT publication descriptors. Each result must contain a
+`topic` string and a `payload` JSON value, and may contain a `strictness`
+override. This lets one journal entry produce different payloads and delivery
+policies on different topics.
 
 The filter also receives `$timestamp_ms`, the journal receive time in Unix
 milliseconds, and `$event_id`, an unpadded base64url HMAC-SHA256 of the journal
@@ -47,6 +48,22 @@ checkpoints the journal entry.
 Telemetry uses QoS 1 and is not retained. The last acknowledged journal cursor
 is written unencrypted as retained QoS 1 JSON to the configured state topic.
 Only the bridge should have access to that topic.
+
+The bridge requires MQTT 5 so it can inspect PUBACK reason codes. The required
+`mqtt.strictness` setting controls broker-rejected telemetry:
+
+- `ignore` silently skips it.
+- `warn` logs a warning and skips it.
+- `fail` exits without checkpointing the journal entry.
+- `require-subscriber` also exits when the broker explicitly reports that no
+  subscription matched the topic.
+
+MQTT brokers are not required to report `No matching subscribers`, so the last
+mode is a best-effort check rather than a delivery guarantee. Broker rejection
+of the retained checkpoint is always fatal regardless of this setting.
+
+Each jq output may override the configured policy for that publication with a
+`strictness` field. Omit the field to inherit `mqtt.strictness`.
 
 ## Install
 
@@ -108,6 +125,10 @@ replay the complete output group; `$event_id` remains stable. Invalid JSON, jq
 runtime failures, invalid publication descriptors, and an intentional
 zero-output filter are skipped and checkpointed so one poison record cannot
 block the stream.
+
+With `mqtt.strictness = "fail"` or `"require-subscriber"`, a rejected
+publication similarly leaves the cursor unchanged. Publications earlier in the
+same output group may therefore be replayed after the problem is corrected.
 
 Configurations from the initial two-filter design must replace
 `topic_filter` and `content_filter` with `publish_filter`. The program reports a

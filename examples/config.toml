@@ -10,6 +10,9 @@ client_id = "lokimankeli-victron"
 username = "lokimankeli"
 password = "replace-me"
 keepalive = 60
+# Baseline for every publication: "ignore", "warn", "fail", or
+# "require-subscriber". A jq output can override this with its own strictness.
+strictness = "warn"
 
 [mqtt.tls]
 enabled = true
@@ -33,6 +36,7 @@ publish_filter = '''
 },
 {
   topic: "victron-ble/\(.address)/data",
+  strictness: "require-subscriber",
   payload: (
     .payload
     + {timestamp_ms: $timestamp_ms, event_id: $event_id}

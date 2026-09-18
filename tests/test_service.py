@@ -6,17 +6,20 @@ from datetime import UTC, datetime
 
 from lokimankeli.config import Config, MQTTConfig
 from lokimankeli.filters import FilterError, Publication
+from lokimankeli.mqtt import MQTTError, PublishResult
 from lokimankeli.service import BridgeService, ServiceError, timestamp_milliseconds
 
 
-def config() -> Config:
+def config(strictness: str = "warn") -> Config:
     return Config(
         journal_scope="system",
         journal_unit="producer.service",
         publish_filter='{topic: "telemetry/device", payload: .}',
         state_topic="state/producer",
         event_id_key="0123456789abcdef0123456789abcdef",
-        mqtt=MQTTConfig(host="broker", client_id="bridge"),
+        mqtt=MQTTConfig(
+            host="broker", client_id="bridge", strictness=strictness
+        ),
     )
 
 
@@ -33,11 +36,12 @@ class FakeJournal:
 
 
 class FakeMQTT:
-    def __init__(self, stored="stored-cursor"):
+    def __init__(self, stored="stored-cursor", results=None):
         self.stored = stored
         self.connected = False
         self.closed = False
         self.calls = []
+        self.results = list(results or [])
 
     def connect(self):
         self.connected = True
@@ -48,6 +52,9 @@ class FakeMQTT:
 
     def publish(self, topic, payload, *, retain, stop):
         self.calls.append(("publish", topic, payload, retain))
+        if self.results:
+            return self.results.pop(0)
+        return PublishResult("Success", False, False)
 
     def save_cursor(self, topic, cursor, stop):
         self.calls.append(("state", topic, cursor))
@@ -116,6 +123,116 @@ class ServiceTests(unittest.TestCase):
         )
         service._process(entry)
         self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-2")])
+
+    def test_rejected_publication_is_warned_and_checkpointed(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT(results=[PublishResult("Not authorized", True, False)])
+        service = BridgeService(
+            config(),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(
+                [
+                    Publication("telemetry/denied", "1"),
+                    Publication("telemetry/allowed", "2"),
+                ]
+            ),
+        )
+        with self.assertLogs("lokimankeli.service", "WARNING") as logs:
+            service._process(entry)
+        self.assertIn("Not authorized", " ".join(logs.output))
+        self.assertEqual(
+            [call[1] for call in mqtt.calls if call[0] == "publish"],
+            ["telemetry/denied", "telemetry/allowed"],
+        )
+        self.assertEqual(mqtt.calls[-1], ("state", "state/producer", "cursor-2"))
+
+    def test_rejected_publication_is_ignored_without_logging(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT(results=[PublishResult("Not authorized", True, False)])
+        service = BridgeService(
+            config("ignore"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(),
+        )
+        with self.assertNoLogs("lokimankeli.service", "WARNING"):
+            service._process(entry)
+        self.assertEqual(mqtt.calls[-1], ("state", "state/producer", "cursor-2"))
+
+    def test_rejected_publication_fails_without_checkpoint(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT(results=[PublishResult("Not authorized", True, False)])
+        service = BridgeService(
+            config("fail"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(),
+        )
+        with self.assertRaisesRegex(MQTTError, "Not authorized"):
+            service._process(entry)
+        self.assertFalse(any(call[0] == "state" for call in mqtt.calls))
+
+    def test_require_subscriber_fails_when_broker_reports_none(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        mqtt = FakeMQTT(results=[PublishResult("No matching subscribers", False, True)])
+        service = BridgeService(
+            config("require-subscriber"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(),
+        )
+        with self.assertRaisesRegex(MQTTError, "no matching subscribers"):
+            service._process(entry)
+        self.assertFalse(any(call[0] == "state" for call in mqtt.calls))
+
+    def test_publication_strictness_overrides_configured_policy(self):
+        entry = {
+            "__CURSOR": "cursor-2",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "{}",
+        }
+        no_subscribers = PublishResult("No matching subscribers", False, True)
+        mqtt = FakeMQTT(results=[no_subscribers, no_subscribers])
+        service = BridgeService(
+            config("warn"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=FakeFilters(
+                [
+                    Publication("telemetry/rssi", "1"),
+                    Publication("telemetry/data", "2", "require-subscriber"),
+                ]
+            ),
+        )
+        with self.assertRaisesRegex(MQTTError, "telemetry/data"):
+            service._process(entry)
+        self.assertEqual(
+            [call[1] for call in mqtt.calls if call[0] == "publish"],
+            ["telemetry/rssi", "telemetry/data"],
+        )
+        self.assertFalse(any(call[0] == "state" for call in mqtt.calls))
 
     def test_filter_error_is_checkpointed(self):
         entry = {
