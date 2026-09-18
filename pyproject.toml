@@ -3,12 +3,13 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "journal-mqtt"
+name = "lokimankeli"
 version = "0.1.0"
 description = "Stream JSON messages from systemd-journald to MQTT"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 dependencies = [
   "jq>=1.8",
   "paho-mqtt>=2.1",
@@ -16,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-journal-mqtt = "journal_mqtt.cli:main"
+lokimankeli = "lokimankeli.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

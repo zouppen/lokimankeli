@@ -15,7 +15,7 @@ from .service import BridgeService, ServiceError
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="journal-mqtt", description="Stream JSON journal messages to MQTT"
+        prog="lokimankeli", description="Stream JSON journal messages to MQTT"
     )
     parser.add_argument("--config", required=True, help="path to the TOML configuration file")
     parser.add_argument(

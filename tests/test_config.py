@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from journal_mqtt.config import ConfigError, load_config
+from lokimankeli.config import ConfigError, load_config
 
 VALID = '''
 [journal]

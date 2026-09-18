@@ -4,9 +4,9 @@ import threading
 import unittest
 from datetime import UTC, datetime
 
-from journal_mqtt.config import Config, MQTTConfig
-from journal_mqtt.filters import FilterError, Publication
-from journal_mqtt.service import BridgeService, ServiceError, timestamp_milliseconds
+from lokimankeli.config import Config, MQTTConfig
+from lokimankeli.filters import FilterError, Publication
+from lokimankeli.service import BridgeService, ServiceError, timestamp_milliseconds
 
 
 def config() -> Config:

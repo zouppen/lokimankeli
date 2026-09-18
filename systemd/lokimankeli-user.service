@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/journal-mqtt --config %h/.config/journal-mqtt/victron.toml
+ExecStart=/usr/local/bin/lokimankeli --config %h/.config/lokimankeli/victron.toml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes

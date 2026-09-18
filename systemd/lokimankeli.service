@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=journal-mqtt
-Group=journal-mqtt
+User=lokimankeli
+Group=lokimankeli
 SupplementaryGroups=systemd-journal
-ExecStart=/usr/local/bin/journal-mqtt --config /etc/journal-mqtt-victron.toml
+ExecStart=/usr/local/bin/lokimankeli --config /etc/lokimankeli-victron.toml
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes

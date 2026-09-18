@@ -50,10 +50,10 @@ class JQPublishFilter:
         self._state_topic = state_topic
         try:
             wrapper = (
-                ". as $__journal_mqtt | "
-                "$__journal_mqtt.timestamp as $timestamp | "
-                "$__journal_mqtt.event_id as $event_id | "
-                "$__journal_mqtt.message | ("
+                ". as $__lokimankeli | "
+                "$__lokimankeli.timestamp as $timestamp | "
+                "$__lokimankeli.event_id as $event_id | "
+                "$__lokimankeli.message | ("
                 + publish_filter
                 + ")"
             )

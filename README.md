@@ -1,6 +1,6 @@
-# journal-mqtt
+# lokimankeli
 
-`journal-mqtt` follows the stdout records of one systemd service, decodes each
+`lokimankeli` follows the stdout records of one systemd service, decodes each
 `MESSAGE` as a JSON object, transforms it with jq, and publishes it to MQTT.
 It reads journald directly and does not invoke `journalctl` or `stdbuf`.
 
@@ -59,7 +59,7 @@ Install the project with your normal Python packaging workflow, then copy
 restrict its permissions. The program deliberately has no default config path:
 
 ```console
-journal-mqtt --config /path/to/bridge.toml --cursor 's=...;i=...;b=...;m=...;t=...;x=...'
+lokimankeli --config /path/to/bridge.toml --cursor 's=...;i=...;b=...;m=...;t=...;x=...'
 ```
 
 `--cursor` is required for the first run because no retained checkpoint exists
@@ -76,7 +76,7 @@ dedicated service group for a system service, or `0600` for a user service.
 
 Example system and user units are under [`systemd/`](systemd/). They contain
 illustrative explicit config paths; edit `ExecStart` to the path chosen for each
-instance. For the system unit, create the unprivileged `journal-mqtt` account
+instance. For the system unit, create the unprivileged `lokimankeli` account
 and grant it membership in `systemd-journal`. A user unit reads only the current
 user journal and should set `journal.scope = "user"`.
 
@@ -97,3 +97,9 @@ block the stream.
 Configurations from the initial two-filter design must replace
 `topic_filter` and `content_filter` with `publish_filter`. The program reports a
 specific migration error if either legacy key is present.
+
+## License
+
+`lokimankeli` is free software licensed under the GNU General Public License,
+version 3 or (at your option) any later version. See [`LICENSE`](LICENSE) for
+the complete license text.

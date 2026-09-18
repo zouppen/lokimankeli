@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from journal_mqtt.filters import FilterError, event_id, validate_publish_topic
+from lokimankeli.filters import FilterError, event_id, validate_publish_topic
 
 
 class FilterUtilityTests(unittest.TestCase):

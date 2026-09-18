@@ -6,8 +6,8 @@ unit = "victron-ble.service"
 [mqtt]
 host = "mqtt.example.net"
 port = 8883
-client_id = "journal-mqtt-victron"
-username = "journal-mqtt"
+client_id = "lokimankeli-victron"
+username = "lokimankeli"
 password = "replace-me"
 keepalive = 60
 
@@ -40,7 +40,7 @@ publish_filter = '''
 '''
 
 # Give every bridge instance its own exact checkpoint topic.
-state_topic = "journal-mqtt/state/victron"
+state_topic = "lokimankeli/state/victron"
 
 [security]
 # Use a stable, random value of at least 32 characters. Do not reuse it elsewhere.

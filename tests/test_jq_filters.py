@@ -4,7 +4,7 @@ import importlib.util
 import json
 import unittest
 
-from journal_mqtt.filters import FilterError, JQPublishFilter
+from lokimankeli.filters import FilterError, JQPublishFilter
 
 
 @unittest.skipIf(importlib.util.find_spec("jq") is None, "Python jq binding is not installed")
