@@ -42,7 +42,7 @@ class ConfigTests(unittest.TestCase):
             load_config(self.write(VALID.replace('strictness = "warn"\n', "")))
 
     def test_accepts_strictness_values(self) -> None:
-        for value in ("ignore", "warn", "fail", "require-subscriber"):
+        for value in ("ignore", "warn", "fail", "require-sub"):
             with self.subTest(value=value):
                 configured = VALID.replace(
                     'strictness = "warn"',
@@ -54,7 +54,7 @@ class ConfigTests(unittest.TestCase):
                 )
 
     def test_rejects_invalid_strictness(self) -> None:
-        for value in ('"loud"', "true"):
+        for value in ('"loud"', '"require-subscriber"', "true"):
             with self.subTest(value=value):
                 configured = VALID.replace(
                     'strictness = "warn"',

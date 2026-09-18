@@ -89,13 +89,13 @@ class BridgeService:
                 detail = (
                     f"MQTT broker rejected publication to {publication.topic!r}: {result.reason}"
                 )
-                if strictness in {"fail", "require-subscriber"}:
+                if strictness in {"fail", "require-sub"}:
                     raise MQTTError(detail)
                 if strictness == "warn":
                     LOG.warning("%s; skipping", detail)
             elif (
                 result.no_matching_subscribers
-                and strictness == "require-subscriber"
+                and strictness == "require-sub"
             ):
                 raise MQTTError(
                     f"MQTT broker reported no matching subscribers for {publication.topic!r}"

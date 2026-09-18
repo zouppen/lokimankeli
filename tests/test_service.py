@@ -196,7 +196,7 @@ class ServiceTests(unittest.TestCase):
         }
         mqtt = FakeMQTT(results=[PublishResult("No matching subscribers", False, True)])
         service = BridgeService(
-            config("require-subscriber"),
+            config("require-sub"),
             threading.Event(),
             journal=FakeJournal(),
             mqtt=mqtt,
@@ -222,7 +222,7 @@ class ServiceTests(unittest.TestCase):
             filters=FakeFilters(
                 [
                     Publication("telemetry/rssi", "1"),
-                    Publication("telemetry/data", "2", "require-subscriber"),
+                    Publication("telemetry/data", "2", "require-sub"),
                 ]
             ),
         )

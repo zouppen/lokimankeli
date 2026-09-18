@@ -55,7 +55,7 @@ The bridge requires MQTT 5 so it can inspect PUBACK reason codes. The required
 - `ignore` silently skips it.
 - `warn` logs a warning and skips it.
 - `fail` exits without checkpointing the journal entry.
-- `require-subscriber` also exits when the broker explicitly reports that no
+- `require-sub` also exits when the broker explicitly reports that no
   subscription matched the topic.
 
 MQTT brokers are not required to report `No matching subscribers`, so the last
@@ -126,7 +126,7 @@ runtime failures, invalid publication descriptors, and an intentional
 zero-output filter are skipped and checkpointed so one poison record cannot
 block the stream.
 
-With `mqtt.strictness = "fail"` or `"require-subscriber"`, a rejected
+With `mqtt.strictness = "fail"` or `"require-sub"`, a rejected
 publication similarly leaves the cursor unchanged. Publications earlier in the
 same output group may therefore be replayed after the problem is corrected.
 

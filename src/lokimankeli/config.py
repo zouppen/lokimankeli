@@ -12,7 +12,7 @@ class ConfigError(ValueError):
 
 
 PUBLISH_STRICTNESS_VALUES = frozenset(
-    {"ignore", "warn", "fail", "require-subscriber"}
+    {"ignore", "warn", "fail", "require-sub"}
 )
 
 

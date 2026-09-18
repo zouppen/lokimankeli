@@ -67,7 +67,7 @@ class JQFilterTests(unittest.TestCase):
         self.assertIsNone(result[1].strictness)
 
     def test_rejects_invalid_publication_strictness(self) -> None:
-        for value in ('"unknown"', "null", "true", "{}"):
+        for value in ('"unknown"', '"require-subscriber"', "null", "true", "{}"):
             with self.subTest(value=value):
                 publish_filter = JQPublishFilter(
                     f'{{topic: "events", payload: {{}}, strictness: {value}}}',
