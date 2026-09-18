@@ -31,6 +31,8 @@ enabled = true
 
 [[route]]
 unit = "victron-ble.service"
+# Decode MESSAGE as JSON before jq. This is the default.
+message_format = "json"
 # Behavior when jq evaluation or publication descriptor validation fails for
 # an entry: "ignore", "warn", or "fail".
 filter_strictness = "warn"
@@ -57,10 +59,13 @@ publish_filter = '''
 
 [[route]]
 unit = "environment.service"
+message_format = "string"
 filter_strictness = "warn"
 publish_filter = '''
 {
-  topic: "environment/measurements",
-  payload: (. + {timestamp_ms: $timestamp_ms, event_id: $event_id})
+  topic: "environment/log",
+  payload: {
+    message: ., timestamp_ms: $timestamp_ms, event_id: $event_id
+  }
 }
 '''

@@ -13,7 +13,11 @@ from lokimankeli.mqtt import MQTTError, PublishResult
 from lokimankeli.service import BridgeService, ServiceError, timestamp_milliseconds
 
 
-def config(strictness: str = "warn", filter_strictness: str = "warn") -> Config:
+def config(
+    strictness: str = "warn",
+    filter_strictness: str = "warn",
+    message_format: str = "json",
+) -> Config:
     return Config(
         log_level="info",
         journal_scope="system",
@@ -22,6 +26,7 @@ def config(strictness: str = "warn", filter_strictness: str = "warn") -> Config:
                 unit="producer.service",
                 publish_filter='{topic: "telemetry/device", payload: .}',
                 filter_strictness=filter_strictness,
+                message_format=message_format,
             ),
             RouteConfig(
                 unit="audit.service",
@@ -225,6 +230,133 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(producer_filter.inputs, [])
         self.assertEqual(audit_filter.inputs[0][0], {"kind": "audit"})
         self.assertIn(("publish", "audit", "2", False), mqtt.calls)
+
+    def test_string_route_passes_non_json_message_unchanged(self):
+        entry = {
+            "__CURSOR": "cursor-text",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "plain log message",
+        }
+        filters = FakeFilters()
+        service = BridgeService(
+            config(message_format="string"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=FakeMQTT(),
+            filters=filters,
+        )
+        service._process(entry)
+        self.assertEqual(filters.inputs[0][0], "plain log message")
+
+    def test_string_route_decodes_utf8_bytes(self):
+        entry = {
+            "__CURSOR": "cursor-text",
+            "__REALTIME_TIMESTAMP": "1000",
+            "MESSAGE": "hyvää".encode(),
+        }
+        filters = FakeFilters()
+        service = BridgeService(
+            config(message_format="string"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=FakeMQTT(),
+            filters=filters,
+        )
+        service._process(entry)
+        self.assertEqual(filters.inputs[0][0], "hyvää")
+
+    def test_json_route_accepts_non_object_values(self):
+        cases = {
+            "array": ('[1, 2]', [1, 2]),
+            "string": ('"value"', "value"),
+            "number": ("3", 3),
+            "boolean": ("true", True),
+            "null": ("null", None),
+        }
+        for name, (raw, expected) in cases.items():
+            with self.subTest(name=name):
+                filters = FakeFilters()
+                service = BridgeService(
+                    config(),
+                    threading.Event(),
+                    journal=FakeJournal(),
+                    mqtt=FakeMQTT(),
+                    filters=filters,
+                )
+                service._process(
+                    {
+                        "__CURSOR": f"cursor-{name}",
+                        "__REALTIME_TIMESTAMP": "1000",
+                        "MESSAGE": raw,
+                    }
+                )
+                self.assertEqual(filters.inputs[0][0], expected)
+
+    def test_invalid_json_is_warned_and_checkpointed(self):
+        mqtt = FakeMQTT()
+        filters = FakeFilters()
+        service = BridgeService(
+            config(),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=filters,
+        )
+        with self.assertLogs("lokimankeli.service", "WARNING") as logs:
+            service._process(
+                {
+                    "__CURSOR": "cursor-invalid",
+                    "__REALTIME_TIMESTAMP": "1000",
+                    "MESSAGE": "not JSON",
+                }
+            )
+        self.assertIn("not valid JSON", " ".join(logs.output))
+        self.assertEqual(filters.inputs, [])
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-invalid")])
+
+    def test_invalid_utf8_string_is_warned_and_checkpointed(self):
+        mqtt = FakeMQTT()
+        filters = FakeFilters()
+        service = BridgeService(
+            config(message_format="string"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=filters,
+        )
+        with self.assertLogs("lokimankeli.service", "WARNING") as logs:
+            service._process(
+                {
+                    "__CURSOR": "cursor-invalid",
+                    "__REALTIME_TIMESTAMP": "1000",
+                    "MESSAGE": b"\xff",
+                }
+            )
+        self.assertIn("not valid UTF-8", " ".join(logs.output))
+        self.assertEqual(filters.inputs, [])
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-invalid")])
+
+    def test_non_text_message_is_warned_and_checkpointed(self):
+        mqtt = FakeMQTT()
+        filters = FakeFilters()
+        service = BridgeService(
+            config(message_format="string"),
+            threading.Event(),
+            journal=FakeJournal(),
+            mqtt=mqtt,
+            filters=filters,
+        )
+        with self.assertLogs("lokimankeli.service", "WARNING") as logs:
+            service._process(
+                {
+                    "__CURSOR": "cursor-invalid",
+                    "__REALTIME_TIMESTAMP": "1000",
+                    "MESSAGE": 42,
+                }
+            )
+        self.assertIn("MESSAGE is not text", " ".join(logs.output))
+        self.assertEqual(filters.inputs, [])
+        self.assertEqual(mqtt.calls, [("state", "state/producer", "cursor-invalid")])
 
     def test_entry_from_unconfigured_unit_is_fatal_without_checkpoint(self):
         mqtt = FakeMQTT()

@@ -46,9 +46,32 @@ class ConfigTests(unittest.TestCase):
             '{topic: ("events/" + .id), payload: .}',
         )
         self.assertEqual(config.routes[0].filter_strictness, "warn")
+        self.assertEqual(config.routes[0].message_format, "json")
         self.assertEqual(config.routes[1].filter_strictness, "fail")
         self.assertEqual(config.mqtt.strictness, "warn")
         self.assertEqual(config.mqtt.state_topic, "state/producer")
+
+    def test_accepts_message_formats(self) -> None:
+        for value in ("json", "string"):
+            with self.subTest(value=value):
+                configured = VALID.replace(
+                    'unit = "producer.service"',
+                    f'unit = "producer.service"\nmessage_format = "{value}"',
+                )
+                self.assertEqual(
+                    load_config(self.write(configured)).routes[0].message_format,
+                    value,
+                )
+
+    def test_rejects_invalid_message_format(self) -> None:
+        for value in ('"yaml"', "true"):
+            with self.subTest(value=value):
+                configured = VALID.replace(
+                    'unit = "producer.service"',
+                    f'unit = "producer.service"\nmessage_format = {value}',
+                )
+                with self.assertRaisesRegex(ConfigError, "message_format"):
+                    load_config(self.write(configured))
 
     def test_accepts_log_levels(self) -> None:
         for value in ("debug", "info", "warning", "error", "critical"):

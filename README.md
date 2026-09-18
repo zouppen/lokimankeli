@@ -1,7 +1,7 @@
 # lokimankeli
 
 `lokimankeli` follows the stdout records of configured systemd services,
-decodes each `MESSAGE` as a JSON object, transforms it with jq, and publishes
+optionally decodes each `MESSAGE` as JSON, transforms it with jq, and publishes
 it to MQTT.
 
 This is basically cleaner implementation of the sender filters in my old tool
@@ -14,7 +14,12 @@ Each `[[route]]` selects one systemd unit and defines a required
 configured journal scope and dispatches each record to the filter for its
 unit. Unit names must be unique.
 
-The filter receives the original JSON object and emits zero or more MQTT
+Each route may set `message_format = "json"` to decode `MESSAGE` before jq, or
+`message_format = "string"` to pass the complete text directly. The default is
+`json`, which accepts any JSON value, not only objects. Invalid JSON or invalid
+UTF-8 text is warned, skipped, and checkpointed.
+
+The filter receives that decoded value or string and emits zero or more MQTT
 publication descriptors. Each result must contain a `topic` string and a
 `payload` JSON value, and may contain a `strictness` override. This lets one
 journal entry produce different payloads and delivery policies on different
@@ -194,8 +199,9 @@ processed until the error is corrected. A crash between telemetry
 acknowledgement and checkpoint acknowledgement may replay the complete output
 group; `$event_id` remains stable. Jq runtime failures and invalid publication
 descriptors are handled according to that route's `filter_strictness`. An
-intentional zero-output result checkpoints normally. Invalid JSON and invalid
-journal timestamps continue to be warned, skipped, and checkpointed.
+intentional zero-output result checkpoints normally. Invalid message encoding,
+invalid JSON in JSON-mode routes, and invalid journal timestamps are warned,
+skipped, and checkpointed.
 
 With `mqtt.strictness = "fail"` or `"require-sub"`, a rejected
 publication similarly leaves the cursor unchanged. Publications earlier in the

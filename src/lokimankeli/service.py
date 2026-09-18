@@ -76,14 +76,22 @@ class BridgeService:
             raise ServiceError(f"journal entry has no configured route for unit {unit!r}")
 
         raw = entry.get("MESSAGE")
-        try:
-            message = json.loads(raw) if isinstance(raw, (str, bytes, bytearray)) else None
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            LOG.warning("skipping journal entry whose MESSAGE is not JSON: %s", exc)
+        if not isinstance(raw, (str, bytes, bytearray)):
+            LOG.warning("skipping journal entry whose MESSAGE is not text")
             self._checkpoint(cursor)
             return
-        if not isinstance(message, dict):
-            LOG.warning("skipping journal entry whose MESSAGE is not a JSON object")
+        try:
+            if route.message_format == "json":
+                message = json.loads(raw)
+            elif isinstance(raw, str):
+                message = raw
+            else:
+                message = bytes(raw).decode("utf-8")
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            expected = "valid JSON" if route.message_format == "json" else "valid UTF-8"
+            LOG.warning(
+                "skipping journal entry whose MESSAGE is not %s: %s", expected, exc
+            )
             self._checkpoint(cursor)
             return
 

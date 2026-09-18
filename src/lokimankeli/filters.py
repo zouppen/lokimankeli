@@ -63,7 +63,7 @@ class JQPublishFilter:
             raise FilterError(f"cannot compile jq filter: {exc}") from exc
 
     def transform(
-        self, message: dict[str, Any], timestamp_ms: int, identifier: str
+        self, message: Any, timestamp_ms: int, identifier: str
     ) -> list[Publication]:
         context = {"message": message, "timestamp_ms": timestamp_ms, "event_id": identifier}
         try:

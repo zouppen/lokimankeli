@@ -38,6 +38,17 @@ class JQFilterTests(unittest.TestCase):
         publish_filter = JQPublishFilter("empty", "state/bridge")
         self.assertEqual(publish_filter.transform({}, 1234, "event-id"), [])
 
+    def test_string_input_is_available_to_filter(self) -> None:
+        publish_filter = JQPublishFilter(
+            '{topic: "logs", payload: {message: ., id: $event_id}}',
+            "state/bridge",
+        )
+        result = publish_filter.transform("plain log message", 1234, "event-id")
+        self.assertEqual(
+            json.loads(result[0].payload),
+            {"message": "plain log message", "id": "event-id"},
+        )
+
     def test_old_timestamp_variable_is_not_supported(self) -> None:
         with self.assertRaises(FilterError):
             JQPublishFilter(

@@ -15,6 +15,7 @@ PUBLISH_STRICTNESS_VALUES = frozenset(
     {"ignore", "warn", "fail", "require-sub"}
 )
 FILTER_STRICTNESS_VALUES = frozenset({"ignore", "warn", "fail"})
+MESSAGE_FORMAT_VALUES = frozenset({"json", "string"})
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class RouteConfig:
     unit: str
     publish_filter: str
     filter_strictness: str
+    message_format: str = "json"
 
 
 def _table(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -159,6 +161,10 @@ def parse_config(data: dict[str, Any]) -> Config:
         if unit in seen_units:
             raise ConfigError(f"duplicate route unit: {unit!r}")
         seen_units.add(unit)
+        message_format = route.get("message_format", "json")
+        if not isinstance(message_format, str) or message_format not in MESSAGE_FORMAT_VALUES:
+            expected = ", ".join(repr(choice) for choice in sorted(MESSAGE_FORMAT_VALUES))
+            raise ConfigError(f"message_format must be one of {expected}")
         routes.append(
             RouteConfig(
                 unit=unit,
@@ -166,6 +172,7 @@ def parse_config(data: dict[str, Any]) -> Config:
                 filter_strictness=_choice(
                     route, "filter_strictness", FILTER_STRICTNESS_VALUES
                 ),
+                message_format=message_format,
             )
         )
 
