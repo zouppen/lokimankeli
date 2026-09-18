@@ -141,10 +141,10 @@ def config_log_level(data: dict[str, Any]) -> str:
 def parse_config(data: dict[str, Any]) -> Config:
     log_level = config_log_level(data)
 
+    general = _table(data, "general")
     journal = _table(data, "journal")
     mqtt_data = _table(data, "mqtt")
     route_data = _table_array(data, "route")
-    security = _table(data, "security")
 
     scope = _string(journal, "scope")
     if scope not in {"system", "user"}:
@@ -169,9 +169,11 @@ def parse_config(data: dict[str, Any]) -> Config:
             )
         )
 
-    event_id_key = _string(security, "event_id_key")
+    event_id_key = general.get("event_id_key")
+    if not isinstance(event_id_key, str) or not event_id_key:
+        raise ConfigError("general.event_id_key must be a non-empty string")
     if len(event_id_key) < 32:
-        raise ConfigError("security.event_id_key must contain at least 32 characters")
+        raise ConfigError("general.event_id_key must contain at least 32 characters")
 
     tls_data = mqtt_data.get("tls", {})
     if not isinstance(tls_data, dict):

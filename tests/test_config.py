@@ -7,6 +7,8 @@ from pathlib import Path
 from lokimankeli.config import ConfigError, config_log_level, load_config, read_config
 
 VALID = '''
+[general]
+event_id_key = "0123456789abcdef0123456789abcdef"
 [journal]
 scope = "system"
 [mqtt]
@@ -22,8 +24,6 @@ publish_filter = '{topic: ("events/" + .id), payload: .}'
 unit = "audit.service"
 filter_strictness = "fail"
 publish_filter = '{topic: "audit", payload: .}'
-[security]
-event_id_key = "0123456789abcdef0123456789abcdef"
 '''
 
 
@@ -53,12 +53,20 @@ class ConfigTests(unittest.TestCase):
     def test_accepts_log_levels(self) -> None:
         for value in ("debug", "info", "warning", "error", "critical"):
             with self.subTest(value=value):
-                configured = f'[general]\nlog_level = "{value}"\n' + VALID
+                configured = VALID.replace(
+                    "[general]", f'[general]\nlog_level = "{value}"'
+                )
                 self.assertEqual(load_config(self.write(configured)).log_level, value)
 
     def test_rejects_invalid_log_level(self) -> None:
         with self.assertRaisesRegex(ConfigError, "general.log_level"):
-            load_config(self.write('[general]\nlog_level = "verbose"\n' + VALID))
+            load_config(
+                self.write(
+                    VALID.replace(
+                        "[general]", '[general]\nlog_level = "verbose"'
+                    )
+                )
+            )
 
     def test_log_level_can_be_processed_before_remaining_config(self) -> None:
         data = read_config(self.write('[general]\nlog_level = "debug"\n'))
@@ -102,10 +110,7 @@ class ConfigTests(unittest.TestCase):
                     load_config(self.write(configured))
 
     def test_requires_at_least_one_route(self) -> None:
-        without_routes = VALID.split("[[route]]", 1)[0] + '''
-[security]
-event_id_key = "0123456789abcdef0123456789abcdef"
-'''
+        without_routes = VALID.split("[[route]]", 1)[0]
         with self.assertRaisesRegex(ConfigError, "route"):
             load_config(self.write(without_routes))
 
@@ -140,10 +145,29 @@ event_id_key = "0123456789abcdef0123456789abcdef"
             load_config(self.write(VALID.replace('scope = "system"', 'scope = "both"')))
 
     def test_rejects_short_hmac_key(self) -> None:
-        with self.assertRaisesRegex(ConfigError, "32"):
+        with self.assertRaisesRegex(ConfigError, "general.event_id_key.*32"):
             load_config(
                 self.write(VALID.replace("0123456789abcdef0123456789abcdef", "short"))
             )
+
+    def test_requires_event_id_key_in_general(self) -> None:
+        old_location = VALID.replace(
+            'event_id_key = "0123456789abcdef0123456789abcdef"\n',
+            '',
+        ) + '''
+[security]
+event_id_key = "0123456789abcdef0123456789abcdef"
+'''
+        with self.assertRaisesRegex(ConfigError, "event_id_key"):
+            load_config(self.write(old_location))
+
+    def test_rejects_non_string_event_id_key(self) -> None:
+        configured = VALID.replace(
+            'event_id_key = "0123456789abcdef0123456789abcdef"',
+            "event_id_key = true",
+        )
+        with self.assertRaisesRegex(ConfigError, "general.event_id_key"):
+            load_config(self.write(configured))
 
     def test_rejects_state_wildcard(self) -> None:
         with self.assertRaisesRegex(ConfigError, "wildcard"):

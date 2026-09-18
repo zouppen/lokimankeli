@@ -110,9 +110,10 @@ Debug logs include topic names but not payloads, cursors, or event IDs.
 The initial checkpoint and recovery procedure is described under
 [Service deployment](#service-deployment).
 
-The config file contains the MQTT password and HMAC key. Use mode `0600`. The
-system service reads its root-owned configuration through a systemd credential;
-the user service reads its configuration directly as the current user.
+The config file contains the MQTT password and the HMAC key configured as
+`general.event_id_key`. Use mode `0600`. The system service reads its
+root-owned configuration through a systemd credential; the user service reads
+its configuration directly as the current user.
 
 ## Service deployment
 

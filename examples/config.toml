@@ -1,6 +1,8 @@
 [general]
 # "debug", "info", "warning", "error", or "critical".
 log_level = "info"
+# Use a stable, random value of at least 32 characters. Do not reuse it elsewhere.
+event_id_key = "replace-with-a-random-value-at-least-32-characters"
 
 [journal]
 # Select one local journal scope. Routes below select services within it.
@@ -62,7 +64,3 @@ publish_filter = '''
   payload: (. + {timestamp_ms: $timestamp_ms, event_id: $event_id})
 }
 '''
-
-[security]
-# Use a stable, random value of at least 32 characters. Do not reuse it elsewhere.
-event_id_key = "replace-with-a-random-value-at-least-32-characters"
