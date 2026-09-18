@@ -23,6 +23,9 @@ enabled = true
 # key_file = "client.key"
 
 [routing]
+# Behavior when jq evaluation or publication descriptor validation fails for
+# an entry: "ignore", "warn", or "fail".
+filter_strictness = "warn"
 # Each result defines one complete MQTT publication. This example splits
 # connectivity data and measurements onto separate topics.
 publish_filter = '''

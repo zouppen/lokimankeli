@@ -76,7 +76,10 @@ class BridgeService:
         try:
             publications = self.filters.transform(message, timestamp_ms, identifier)
         except FilterError as exc:
-            LOG.warning("skipping journal entry rejected by jq: %s", exc)
+            if self.config.filter_strictness == "fail":
+                raise
+            if self.config.filter_strictness == "warn":
+                LOG.warning("skipping journal entry rejected by jq: %s", exc)
             self._checkpoint(cursor)
             return
 

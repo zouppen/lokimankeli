@@ -15,6 +15,7 @@ host = "broker"
 client_id = "bridge"
 strictness = "warn"
 [routing]
+filter_strictness = "warn"
 publish_filter = '{topic: ("events/" + .id), payload: .}'
 state_topic = "state/producer"
 [security]
@@ -35,18 +36,49 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.journal_scope, "system")
         self.assertEqual(config.mqtt.port, 1883)
         self.assertEqual(config.publish_filter, '{topic: ("events/" + .id), payload: .}')
+        self.assertEqual(config.filter_strictness, "warn")
         self.assertEqual(config.mqtt.strictness, "warn")
 
     def test_requires_strictness(self) -> None:
         with self.assertRaisesRegex(ConfigError, "strictness"):
-            load_config(self.write(VALID.replace('strictness = "warn"\n', "")))
+            load_config(
+                self.write(
+                    VALID.replace(
+                        'client_id = "bridge"\nstrictness = "warn"\n',
+                        'client_id = "bridge"\n',
+                    )
+                )
+            )
+
+    def test_requires_filter_strictness(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "filter_strictness"):
+            load_config(self.write(VALID.replace('filter_strictness = "warn"\n', "")))
+
+    def test_accepts_filter_strictness_values(self) -> None:
+        for value in ("ignore", "warn", "fail"):
+            with self.subTest(value=value):
+                configured = VALID.replace(
+                    'filter_strictness = "warn"', f'filter_strictness = "{value}"'
+                )
+                self.assertEqual(
+                    load_config(self.write(configured)).filter_strictness, value
+                )
+
+    def test_rejects_invalid_filter_strictness(self) -> None:
+        for value in ('"loud"', '"require-sub"', "true"):
+            with self.subTest(value=value):
+                configured = VALID.replace(
+                    'filter_strictness = "warn"', f"filter_strictness = {value}"
+                )
+                with self.assertRaisesRegex(ConfigError, "filter_strictness"):
+                    load_config(self.write(configured))
 
     def test_accepts_strictness_values(self) -> None:
         for value in ("ignore", "warn", "fail", "require-sub"):
             with self.subTest(value=value):
                 configured = VALID.replace(
-                    'strictness = "warn"',
-                    f'strictness = "{value}"',
+                    'client_id = "bridge"\nstrictness = "warn"',
+                    f'client_id = "bridge"\nstrictness = "{value}"',
                 )
                 self.assertEqual(
                     load_config(self.write(configured)).mqtt.strictness,
@@ -57,8 +89,8 @@ class ConfigTests(unittest.TestCase):
         for value in ('"loud"', '"require-subscriber"', "true"):
             with self.subTest(value=value):
                 configured = VALID.replace(
-                    'strictness = "warn"',
-                    f'strictness = {value}',
+                    'client_id = "bridge"\nstrictness = "warn"',
+                    f'client_id = "bridge"\nstrictness = {value}',
                 )
                 with self.assertRaisesRegex(ConfigError, "strictness"):
                     load_config(self.write(configured))

@@ -14,6 +14,7 @@ class ConfigError(ValueError):
 PUBLISH_STRICTNESS_VALUES = frozenset(
     {"ignore", "warn", "fail", "require-sub"}
 )
+FILTER_STRICTNESS_VALUES = frozenset({"ignore", "warn", "fail"})
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class Config:
     journal_scope: str
     journal_unit: str
     publish_filter: str
+    filter_strictness: str
     state_topic: str
     event_id_key: str
     mqtt: MQTTConfig
@@ -117,6 +119,9 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         names = ", ".join(f"routing.{name}" for name in legacy_filters)
         raise ConfigError(f"{names} replaced by routing.publish_filter")
     publish_filter = _string(routing, "publish_filter")
+    filter_strictness = _choice(
+        routing, "filter_strictness", FILTER_STRICTNESS_VALUES
+    )
     state_topic = _string(routing, "state_topic")
     _validate_topic(state_topic, "routing.state_topic")
 
@@ -166,6 +171,7 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         journal_scope=scope,
         journal_unit=unit,
         publish_filter=publish_filter,
+        filter_strictness=filter_strictness,
         state_topic=state_topic,
         event_id_key=event_id_key,
         mqtt=mqtt,

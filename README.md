@@ -65,6 +65,16 @@ of the retained checkpoint is always fatal regardless of this setting.
 Each jq output may override the configured policy for that publication with a
 `strictness` field. Omit the field to inherit `mqtt.strictness`.
 
+The required `routing.filter_strictness` setting controls jq evaluation errors
+and invalid publication descriptors for individual journal entries:
+
+- `ignore` silently skips and checkpoints the entry.
+- `warn` logs a warning, then skips and checkpoints the entry.
+- `fail` exits without checkpointing the entry.
+
+Jq compilation errors are always fatal. An intentional zero-output filter is a
+successful result and checkpoints normally.
+
 ## Install
 
 Python 3.11 or newer is required. On Debian, the native dependencies are
@@ -121,10 +131,11 @@ untrusted network.
 
 The cursor advances only after all derived MQTT publications are acknowledged.
 A crash between telemetry acknowledgement and checkpoint acknowledgement may
-replay the complete output group; `$event_id` remains stable. Invalid JSON, jq
-runtime failures, invalid publication descriptors, and an intentional
-zero-output filter are skipped and checkpointed so one poison record cannot
-block the stream.
+replay the complete output group; `$event_id` remains stable. Jq runtime
+failures and invalid publication descriptors are handled according to
+`routing.filter_strictness`. An intentional zero-output result checkpoints
+normally. Invalid JSON and invalid journal timestamps continue to be warned,
+skipped, and checkpointed.
 
 With `mqtt.strictness = "fail"` or `"require-sub"`, a rejected
 publication similarly leaves the cursor unchanged. Publications earlier in the
