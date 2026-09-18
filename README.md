@@ -2,7 +2,9 @@
 
 `lokimankeli` follows the stdout records of one systemd service, decodes each
 `MESSAGE` as a JSON object, transforms it with jq, and publishes it to MQTT.
-It reads journald directly and does not invoke `journalctl` or `stdbuf`.
+
+This is basically cleaner implementation of the sender filters in my old tool
+[systemdb](https://github.com/zouppen/systemdb).
 
 ## Message flow
 
