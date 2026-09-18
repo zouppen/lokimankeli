@@ -21,8 +21,8 @@ The older `$timestamp` variable is not defined; filters must use
 {
   topic: "victron/\(.address)/rssi",
   payload: {
-    observed_at_ms: $timestamp_ms,
-    source_event: $event_id,
+    ts: $timestamp_ms,
+    id: $event_id,
     rssi: .rssi
   }
 },
@@ -30,9 +30,9 @@ The older `$timestamp` variable is not defined; filters must use
   topic: "victron/\(.address)/data",
   payload: (
     .payload
-    | del(.private)
-    | .observed_at_ms = $timestamp_ms
-    | .source_event = $event_id
+    | del(.rssi)
+    | .ts = $timestamp_ms
+    | .id = $event_id
   )
 }
 ```
