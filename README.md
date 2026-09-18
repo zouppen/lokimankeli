@@ -4,7 +4,7 @@
 `MESSAGE` as a JSON object, transforms it with jq, and publishes it to MQTT.
 
 This is basically cleaner implementation of the sender filters in my old tool
-[systemdb](https://github.com/zouppen/systemdb).
+[systemdb](https://github.com/zouppen/systemdb/blob/master/send/examples/heppa).
 
 ## Message flow
 
