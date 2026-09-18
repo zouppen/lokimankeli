@@ -17,19 +17,21 @@ WorkingDirectory=%d
 ExecStart=/usr/local/bin/lokimankeli --config config.toml
 Restart=on-failure
 RestartSec=5s
-NoNewPrivileges=yes
+CapabilityBoundingSet=
+LockPersonality=yes
 PrivateDevices=yes
-PrivateTmp=yes
 ProtectClock=yes
 ProtectControlGroups=yes
 ProtectHome=yes
+ProtectHostname=yes
 ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
-ProtectSystem=strict
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
 SystemCallArchitectures=native
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
