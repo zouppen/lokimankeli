@@ -35,13 +35,13 @@ def validate_publish_topic(topic: str, state_topic: str) -> None:
 
 
 @dataclass(frozen=True)
-class TransformedRecord:
+class Publication:
     topic: str
-    payloads: list[str]
+    payload: str
 
 
-class JQFilters:
-    def __init__(self, topic_filter: str, content_filter: str, state_topic: str):
+class JQPublishFilter:
+    def __init__(self, publish_filter: str, state_topic: str):
         try:
             import jq
         except ImportError as exc:  # pragma: no cover - depends on runtime packaging
@@ -49,36 +49,44 @@ class JQFilters:
 
         self._state_topic = state_topic
         try:
-            self._topic = jq.compile(topic_filter)
             wrapper = (
                 ". as $__journal_mqtt | "
                 "$__journal_mqtt.timestamp as $timestamp | "
                 "$__journal_mqtt.event_id as $event_id | "
                 "$__journal_mqtt.message | ("
-                + content_filter
+                + publish_filter
                 + ")"
             )
-            self._content = jq.compile(wrapper)
+            self._filter = jq.compile(wrapper)
         except Exception as exc:
             raise FilterError(f"cannot compile jq filter: {exc}") from exc
 
-    def transform(self, message: dict[str, Any], timestamp: int, identifier: str) -> TransformedRecord:
-        try:
-            topics = self._topic.input_value(message).all()
-        except Exception as exc:
-            raise FilterError(f"topic filter failed: {exc}") from exc
-        if len(topics) != 1 or not isinstance(topics[0], str):
-            raise FilterError("topic filter must produce exactly one string")
-        topic = topics[0]
-        validate_publish_topic(topic, self._state_topic)
-
+    def transform(self, message: dict[str, Any], timestamp: int, identifier: str) -> list[Publication]:
         context = {"message": message, "timestamp": timestamp, "event_id": identifier}
         try:
-            values = self._content.input_value(context).all()
-            payloads = [
-                json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-                for value in values
-            ]
+            values = self._filter.input_value(context).all()
         except Exception as exc:
-            raise FilterError(f"content filter failed: {exc}") from exc
-        return TransformedRecord(topic=topic, payloads=payloads)
+            raise FilterError(f"publish filter failed: {exc}") from exc
+
+        publications: list[Publication] = []
+        for index, value in enumerate(values):
+            if not isinstance(value, dict) or set(value) != {"topic", "payload"}:
+                raise FilterError(
+                    f"publish filter output {index} must contain exactly topic and payload"
+                )
+            topic = value["topic"]
+            if not isinstance(topic, str):
+                raise FilterError(f"publish filter output {index} topic must be a string")
+            validate_publish_topic(topic, self._state_topic)
+            try:
+                payload = json.dumps(
+                    value["payload"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                payload.encode("utf-8")
+            except (TypeError, ValueError) as exc:
+                raise FilterError(f"publish filter output {index} payload is not valid JSON") from exc
+            publications.append(Publication(topic, payload))
+        return publications

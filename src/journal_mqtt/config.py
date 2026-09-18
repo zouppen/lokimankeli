@@ -37,8 +37,7 @@ class MQTTConfig:
 class Config:
     journal_scope: str
     journal_unit: str
-    topic_filter: str
-    content_filter: str
+    publish_filter: str
     state_topic: str
     event_id_key: str
     mqtt: MQTTConfig
@@ -99,8 +98,11 @@ def load_config(path: str | os.PathLike[str]) -> Config:
         raise ConfigError("journal.scope must be 'system' or 'user'")
     unit = _string(journal, "unit")
 
-    topic_filter = _string(routing, "topic_filter")
-    content_filter = _string(routing, "content_filter")
+    legacy_filters = [name for name in ("topic_filter", "content_filter") if name in routing]
+    if legacy_filters:
+        names = ", ".join(f"routing.{name}" for name in legacy_filters)
+        raise ConfigError(f"{names} replaced by routing.publish_filter")
+    publish_filter = _string(routing, "publish_filter")
     state_topic = _string(routing, "state_topic")
     _validate_topic(state_topic, "routing.state_topic")
 
@@ -148,8 +150,7 @@ def load_config(path: str | os.PathLike[str]) -> Config:
     return Config(
         journal_scope=scope,
         journal_unit=unit,
-        topic_filter=topic_filter,
-        content_filter=content_filter,
+        publish_filter=publish_filter,
         state_topic=state_topic,
         event_id_key=event_id_key,
         mqtt=mqtt,

@@ -19,15 +19,24 @@ enabled = true
 # key_file = "/path/to/client-key.pem"
 
 [routing]
-# The topic filter must produce exactly one string from the original object.
-topic_filter = '"victron-ble/" + .address'
-
-# This filter controls the complete JSON payload. It may emit zero or more values.
-# $timestamp is Unix milliseconds and $event_id identifies the journal record.
-content_filter = '''
-del(.sensitive_field)
-| .timestamp = $timestamp
-| .event_id = $event_id
+# Each result defines one complete MQTT publication. This example splits
+# connectivity data and measurements onto separate topics.
+publish_filter = '''
+{
+  topic: "victron-ble/\(.address)/rssi",
+  payload: {
+    timestamp: $timestamp,
+    event_id: $event_id,
+    rssi: .rssi
+  }
+},
+{
+  topic: "victron-ble/\(.address)/data",
+  payload: (
+    .payload
+    + {timestamp: $timestamp, event_id: $event_id}
+  )
+}
 '''
 
 # Give every bridge instance its own exact checkpoint topic.

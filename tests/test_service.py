@@ -5,7 +5,7 @@ import unittest
 from datetime import UTC, datetime
 
 from journal_mqtt.config import Config, MQTTConfig
-from journal_mqtt.filters import FilterError, TransformedRecord
+from journal_mqtt.filters import FilterError, Publication
 from journal_mqtt.service import BridgeService, ServiceError, timestamp_milliseconds
 
 
@@ -13,8 +13,7 @@ def config() -> Config:
     return Config(
         journal_scope="system",
         journal_unit="producer.service",
-        topic_filter=".topic",
-        content_filter=".",
+        publish_filter='{topic: "telemetry/device", payload: .}',
         state_topic="state/producer",
         event_id_key="0123456789abcdef0123456789abcdef",
         mqtt=MQTTConfig(host="broker", client_id="bridge"),
@@ -58,8 +57,12 @@ class FakeMQTT:
 
 
 class FakeFilters:
-    def __init__(self, payloads=None, error=None):
-        self.payloads = payloads if payloads is not None else ['{"ok":true}']
+    def __init__(self, publications=None, error=None):
+        self.publications = (
+            publications
+            if publications is not None
+            else [Publication("telemetry/device", '{"ok":true}')]
+        )
         self.error = error
         self.inputs = []
 
@@ -67,7 +70,7 @@ class FakeFilters:
         self.inputs.append((message, timestamp, identifier))
         if self.error:
             raise self.error
-        return TransformedRecord("telemetry/device", self.payloads)
+        return self.publications
 
 
 class ServiceTests(unittest.TestCase):
@@ -83,7 +86,9 @@ class ServiceTests(unittest.TestCase):
             "MESSAGE": '{"device":"a"}',
         }
         mqtt = FakeMQTT()
-        filters = FakeFilters(["1", "2"])
+        filters = FakeFilters(
+            [Publication("telemetry/device/rssi", "1"), Publication("telemetry/device/data", "2")]
+        )
         service = BridgeService(
             config(), threading.Event(), journal=FakeJournal(), mqtt=mqtt, filters=filters
         )
@@ -91,8 +96,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(
             mqtt.calls,
             [
-                ("publish", "telemetry/device", "1", False),
-                ("publish", "telemetry/device", "2", False),
+                ("publish", "telemetry/device/rssi", "1", False),
+                ("publish", "telemetry/device/data", "2", False),
                 ("state", "state/producer", "cursor-2"),
             ],
         )

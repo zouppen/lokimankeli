@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from .config import Config
-from .filters import FilterError, JQFilters, event_id
+from .filters import FilterError, JQPublishFilter, event_id
 from .journal import JournalSource
 from .mqtt import MQTTBridge
 
@@ -35,15 +35,13 @@ class BridgeService:
         *,
         journal: JournalSource | None = None,
         mqtt: MQTTBridge | None = None,
-        filters: JQFilters | None = None,
+        filters: JQPublishFilter | None = None,
     ):
         self.config = config
         self.stop = stop
         self.journal = journal or JournalSource(config.journal_scope, config.journal_unit)
         self.mqtt = mqtt or MQTTBridge(config.mqtt)
-        self.filters = filters or JQFilters(
-            config.topic_filter, config.content_filter, config.state_topic
-        )
+        self.filters = filters or JQPublishFilter(config.publish_filter, config.state_topic)
 
     def _checkpoint(self, cursor: str) -> None:
         self.mqtt.save_cursor(self.config.state_topic, cursor, self.stop)
@@ -76,14 +74,16 @@ class BridgeService:
 
         identifier = event_id(self.config.event_id_key, cursor)
         try:
-            transformed = self.filters.transform(message, timestamp, identifier)
+            publications = self.filters.transform(message, timestamp, identifier)
         except FilterError as exc:
             LOG.warning("skipping journal entry rejected by jq: %s", exc)
             self._checkpoint(cursor)
             return
 
-        for payload in transformed.payloads:
-            self.mqtt.publish(transformed.topic, payload, retain=False, stop=self.stop)
+        for publication in publications:
+            self.mqtt.publish(
+                publication.topic, publication.payload, retain=False, stop=self.stop
+            )
         self._checkpoint(cursor)
 
     def run(self, cursor_override: str | None = None) -> None:
