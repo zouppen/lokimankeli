@@ -4,6 +4,8 @@ import threading
 from collections.abc import Iterator
 from typing import Any
 
+from .config import RouteConfig
+
 
 class JournalError(RuntimeError):
     pass
@@ -11,7 +13,11 @@ class JournalError(RuntimeError):
 
 class JournalSource:
     def __init__(
-        self, scope: str, units: tuple[str, ...], *, _journal_module: Any | None = None
+        self,
+        scope: str,
+        routes: tuple[RouteConfig, ...],
+        *,
+        _journal_module: Any | None = None,
     ):
         if _journal_module is None:
             try:
@@ -37,9 +43,14 @@ class JournalSource:
         self._pending: dict[str, Any] | None = None
         try:
             self._reader = self._new_reader()
-            for unit in units:
-                self._reader.add_match(**{unit_field: unit})
-            self._reader.add_match(_TRANSPORT="stdout")
+            for index, route in enumerate(routes):
+                if index:
+                    self._reader.add_disjunction()
+                self._reader.add_match(**{unit_field: route.unit})
+                for field, values in route.journal_match:
+                    self._reader.add_conjunction()
+                    for value in values:
+                        self._reader.add_match(**{field: value})
         except Exception as exc:
             raise JournalError("cannot open or filter the selected journal") from exc
 

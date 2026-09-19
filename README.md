@@ -14,6 +14,16 @@ Each `[[route]]` selects one systemd unit and defines a required
 configured journal scope and dispatches each record to the filter for its
 unit. Unit names must be unique.
 
+An optional `journal_match` table adds exact journal-field constraints to a
+route. Fields are combined with AND; an array of values for one field is
+combined with OR. With no constraints, all records attributed to the unit are
+accepted regardless of transport. For example, a container using journald can
+exclude other records associated with its service:
+
+```toml
+journal_match = { _TRANSPORT = "journal", SYSLOG_IDENTIFIER = "my-container" }
+```
+
 Each route may set `message_format = "json"` to decode `MESSAGE` before jq, or
 `message_format = "string"` to pass the complete text directly. The default is
 `json`, which accepts any JSON value, not only objects. Invalid JSON or invalid

@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import unittest
 
+from lokimankeli.config import RouteConfig
 from lokimankeli.journal import JournalError, JournalSource
 
 
@@ -10,22 +11,32 @@ class FakeReader:
     def __init__(self, entries, flags):
         self.entries = entries
         self.flags = flags
-        self.matches = []
+        self.expression = [[{}]]
         self.position = -1
         self.current = None
 
     def add_match(self, **match):
-        self.matches.append(match)
+        term = self.expression[-1][-1]
+        for field, value in match.items():
+            term.setdefault(field, set()).add(value)
+
+    def add_conjunction(self):
+        self.expression[-1].append({})
+
+    def add_disjunction(self):
+        self.expression.append([{}])
 
     def _visible(self):
-        alternatives = {}
-        for match in self.matches:
-            for field, value in match.items():
-                alternatives.setdefault(field, set()).add(value)
         return [
             entry
             for entry in self.entries
-            if all(entry.get(field) in values for field, values in alternatives.items())
+            if any(
+                all(
+                    all(entry.get(field) in values for field, values in term.items())
+                    for term in clause
+                )
+                for clause in self.expression
+            )
         ]
 
     def seek_cursor(self, cursor):
@@ -90,13 +101,22 @@ def entry(cursor, unit="other.service", transport="journal"):
     }
 
 
+def route(unit, journal_match=()):
+    return RouteConfig(
+        unit=unit,
+        publish_filter="empty",
+        filter_strictness="warn",
+        journal_match=journal_match,
+    )
+
+
 class JournalTests(unittest.TestCase):
     def source(self, entries):
         module = FakeJournalModule(entries)
         return (
             JournalSource(
                 "system",
-                ("producer.service", "audit.service"),
+                (route("producer.service"), route("audit.service")),
                 _journal_module=module,
             ),
             module,
@@ -106,11 +126,10 @@ class JournalTests(unittest.TestCase):
         source, _module = self.source([entry("one"), entry("global-tail")])
         self.assertEqual(source.latest_cursor(), "global-tail")
 
-    def test_reader_matches_all_configured_units_and_stdout_only(self):
+    def test_reader_matches_all_transports_for_configured_units_by_default(self):
         entries = [
             entry("producer", "producer.service", "stdout"),
-            entry("audit", "audit.service", "stdout"),
-            entry("wrong-transport", "producer.service", "journal"),
+            entry("audit", "audit.service", "journal"),
             entry("wrong-unit", "other.service", "stdout"),
         ]
         source, _module = self.source(entries)
@@ -121,6 +140,59 @@ class JournalTests(unittest.TestCase):
         stop.set()
         self.assertEqual(list(following), [])
 
+    def test_route_fields_are_anded_and_values_are_ored(self):
+        entries = [
+            {**entry("stdout", "producer.service", "stdout"), "SYSLOG_IDENTIFIER": "app"},
+            {**entry("journal", "producer.service", "journal"), "SYSLOG_IDENTIFIER": "app"},
+            {**entry("wrong-id", "producer.service", "journal"), "SYSLOG_IDENTIFIER": "other"},
+            {**entry("audit", "audit.service", "syslog"), "SYSLOG_IDENTIFIER": "audit"},
+        ]
+        module = FakeJournalModule(entries)
+        source = JournalSource(
+            "system",
+            (
+                route(
+                    "producer.service",
+                    (
+                        ("_TRANSPORT", ("stdout", "journal")),
+                        ("SYSLOG_IDENTIFIER", ("app",)),
+                    ),
+                ),
+                route("audit.service"),
+            ),
+            _journal_module=module,
+        )
+        source.seek_after("stdout")
+        stop = threading.Event()
+        following = source.follow(stop)
+        self.assertEqual(next(following), entries[1])
+        self.assertEqual(next(following), entries[3])
+        stop.set()
+
+    def test_repeated_unit_field_cannot_broaden_another_route(self):
+        entries = [
+            entry("producer", "producer.service"),
+            entry("other", "other.service"),
+            entry("audit", "audit.service"),
+        ]
+        module = FakeJournalModule(entries)
+        source = JournalSource(
+            "system",
+            (
+                route(
+                    "producer.service",
+                    (("_SYSTEMD_UNIT", ("other.service",)),),
+                ),
+                route("audit.service"),
+            ),
+            _journal_module=module,
+        )
+        source.seek_after("producer")
+        stop = threading.Event()
+        following = source.follow(stop)
+        self.assertEqual(next(following), entries[2])
+        stop.set()
+
     def test_entry_unit_uses_scope_specific_field(self):
         system_source, _module = self.source([])
         self.assertEqual(
@@ -129,7 +201,7 @@ class JournalTests(unittest.TestCase):
         )
         user_module = FakeJournalModule([])
         user_source = JournalSource(
-            "user", ("producer.service",), _journal_module=user_module
+            "user", (route("producer.service"),), _journal_module=user_module
         )
         self.assertEqual(
             user_source.entry_unit({"_SYSTEMD_USER_UNIT": "producer.service"}),
@@ -153,7 +225,7 @@ class JournalTests(unittest.TestCase):
     def test_seek_after_preserves_first_later_matching_entry(self):
         entries = [
             entry("global"),
-            entry("matching", "producer.service", "stdout"),
+            entry("matching", "producer.service", "journal"),
         ]
         source, _module = self.source(entries)
         source.seek_after("global")

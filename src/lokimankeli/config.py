@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ PUBLISH_STRICTNESS_VALUES = frozenset(
 )
 FILTER_STRICTNESS_VALUES = frozenset({"ignore", "warn", "fail"})
 MESSAGE_FORMAT_VALUES = frozenset({"json", "string"})
+JOURNAL_FIELD_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class RouteConfig:
     publish_filter: str
     filter_strictness: str
     message_format: str = "json"
+    journal_match: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 def _table(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -165,6 +168,26 @@ def parse_config(data: dict[str, Any]) -> Config:
         if not isinstance(message_format, str) or message_format not in MESSAGE_FORMAT_VALUES:
             expected = ", ".join(repr(choice) for choice in sorted(MESSAGE_FORMAT_VALUES))
             raise ConfigError(f"message_format must be one of {expected}")
+        journal_match_data = route.get("journal_match", {})
+        if not isinstance(journal_match_data, dict):
+            raise ConfigError("journal_match must be a table")
+        journal_match: list[tuple[str, tuple[str, ...]]] = []
+        for field, value in journal_match_data.items():
+            if not JOURNAL_FIELD_PATTERN.fullmatch(field):
+                raise ConfigError(f"journal_match field is invalid: {field!r}")
+            if isinstance(value, str):
+                values = (value,)
+            elif isinstance(value, list) and all(
+                isinstance(item, str) for item in value
+            ):
+                values = tuple(value)
+            else:
+                raise ConfigError(
+                    f"journal_match.{field} must be a string or array of strings"
+                )
+            if not values or any(not item for item in values):
+                raise ConfigError(f"journal_match.{field} values must not be empty")
+            journal_match.append((field, values))
         routes.append(
             RouteConfig(
                 unit=unit,
@@ -173,6 +196,7 @@ def parse_config(data: dict[str, Any]) -> Config:
                     route, "filter_strictness", FILTER_STRICTNESS_VALUES
                 ),
                 message_format=message_format,
+                journal_match=tuple(journal_match),
             )
         )
 

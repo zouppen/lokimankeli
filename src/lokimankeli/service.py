@@ -44,8 +44,14 @@ class BridgeService:
         self.config = config
         self.stop = stop
         self.routes = {route.unit: route for route in config.routes}
+        for route in config.routes:
+            LOG.debug(
+                "configured journal route for %r with matches %r",
+                route.unit,
+                dict(route.journal_match),
+            )
         self.journal = journal or JournalSource(
-            config.journal_scope, tuple(self.routes)
+            config.journal_scope, config.routes
         )
         self.mqtt = mqtt or MQTTBridge(config.mqtt)
         self.filters = filters or {

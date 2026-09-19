@@ -47,9 +47,51 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(config.routes[0].filter_strictness, "warn")
         self.assertEqual(config.routes[0].message_format, "json")
+        self.assertEqual(config.routes[0].journal_match, ())
         self.assertEqual(config.routes[1].filter_strictness, "fail")
         self.assertEqual(config.mqtt.strictness, "warn")
         self.assertEqual(config.mqtt.state_topic, "state/producer")
+
+    def test_loads_journal_match_strings_and_arrays(self) -> None:
+        configured = VALID.replace(
+            'unit = "producer.service"',
+            'unit = "producer.service"\n'
+            'journal_match = { _TRANSPORT = ["stdout", "journal"], '
+            'SYSLOG_IDENTIFIER = "producer" }',
+        )
+        route = load_config(self.write(configured)).routes[0]
+        self.assertEqual(
+            route.journal_match,
+            (
+                ("_TRANSPORT", ("stdout", "journal")),
+                ("SYSLOG_IDENTIFIER", ("producer",)),
+            ),
+        )
+
+    def test_accepts_empty_journal_match(self) -> None:
+        configured = VALID.replace(
+            'unit = "producer.service"',
+            'unit = "producer.service"\njournal_match = {}',
+        )
+        self.assertEqual(load_config(self.write(configured)).routes[0].journal_match, ())
+
+    def test_rejects_invalid_journal_matches(self) -> None:
+        cases = {
+            "not a table": 'journal_match = "stdout"',
+            "invalid field": 'journal_match = { lowercase = "value" }',
+            "wrong value": "journal_match = { _TRANSPORT = true }",
+            "empty string": 'journal_match = { _TRANSPORT = "" }',
+            "empty array": "journal_match = { _TRANSPORT = [] }",
+            "mixed array": 'journal_match = { _TRANSPORT = ["stdout", true] }',
+        }
+        for name, setting in cases.items():
+            with self.subTest(name=name):
+                configured = VALID.replace(
+                    'unit = "producer.service"',
+                    f'unit = "producer.service"\n{setting}',
+                )
+                with self.assertRaisesRegex(ConfigError, "journal_match"):
+                    load_config(self.write(configured))
 
     def test_accepts_message_formats(self) -> None:
         for value in ("json", "string"):

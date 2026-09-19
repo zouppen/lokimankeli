@@ -17,6 +17,7 @@ def config(
     strictness: str = "warn",
     filter_strictness: str = "warn",
     message_format: str = "json",
+    journal_match: tuple[tuple[str, tuple[str, ...]], ...] = (),
 ) -> Config:
     return Config(
         log_level="info",
@@ -27,6 +28,7 @@ def config(
                 publish_filter='{topic: "telemetry/device", payload: .}',
                 filter_strictness=filter_strictness,
                 message_format=message_format,
+                journal_match=journal_match,
             ),
             RouteConfig(
                 unit="audit.service",
@@ -119,6 +121,23 @@ class ServiceTests(unittest.TestCase):
         value = datetime(2026, 9, 17, 12, 0, 3, 647774, tzinfo=UTC)
         self.assertEqual(timestamp_milliseconds(value), 1789646403647)
         self.assertEqual(timestamp_milliseconds("1789646403647774"), 1789646403647)
+
+    def test_debug_log_reports_configured_journal_matches(self):
+        configured = config(
+            journal_match=(("_TRANSPORT", ("journal",)),)
+        )
+        with self.assertLogs("lokimankeli.service", "DEBUG") as logs:
+            BridgeService(
+                configured,
+                threading.Event(),
+                journal=FakeJournal(),
+                mqtt=FakeMQTT(),
+                filters=FakeFilters(),
+            )
+        output = " ".join(logs.output)
+        self.assertIn("producer.service", output)
+        self.assertIn("_TRANSPORT", output)
+        self.assertIn("journal", output)
 
     def test_multiple_payloads_are_published_before_checkpoint(self):
         entry = {
