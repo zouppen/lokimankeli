@@ -11,30 +11,27 @@ class FakeReader:
     def __init__(self, entries, flags):
         self.entries = entries
         self.flags = flags
-        self.expression = [[{}]]
+        self.expression = [{}]
         self.position = -1
         self.current = None
 
     def add_match(self, **match):
-        term = self.expression[-1][-1]
+        term = self.expression[-1]
         for field, value in match.items():
             term.setdefault(field, set()).add(value)
 
     def add_conjunction(self):
-        self.expression[-1].append({})
+        raise AssertionError("route construction must not add explicit conjunctions")
 
     def add_disjunction(self):
-        self.expression.append([{}])
+        self.expression.append({})
 
     def _visible(self):
         return [
             entry
             for entry in self.entries
             if any(
-                all(
-                    all(entry.get(field) in values for field, values in term.items())
-                    for term in clause
-                )
+                all(entry.get(field) in values for field, values in clause.items())
                 for clause in self.expression
             )
         ]
@@ -167,6 +164,75 @@ class JournalTests(unittest.TestCase):
         following = source.follow(stop)
         self.assertEqual(next(following), entries[1])
         self.assertEqual(next(following), entries[3])
+        stop.set()
+
+    def test_unconstrained_first_route_and_constrained_second_route_both_match(self):
+        entries = [
+            entry("start"),
+            entry("victron", "victron-ble.service", "stdout"),
+            {
+                **entry("container", "kasvihuone-monitor.service", "journal"),
+                "SYSLOG_IDENTIFIER": "kasvihuone-monitor",
+            },
+            {
+                **entry("wrong-id", "kasvihuone-monitor.service", "journal"),
+                "SYSLOG_IDENTIFIER": "systemd",
+            },
+        ]
+        module = FakeJournalModule(entries)
+        source = JournalSource(
+            "system",
+            (
+                route("victron-ble.service"),
+                route(
+                    "kasvihuone-monitor.service",
+                    (
+                        ("_TRANSPORT", ("journal",)),
+                        ("SYSLOG_IDENTIFIER", ("kasvihuone-monitor",)),
+                    ),
+                ),
+            ),
+            _journal_module=module,
+        )
+        source.seek_after("start")
+        stop = threading.Event()
+        following = source.follow(stop)
+        self.assertEqual(next(following), entries[1])
+        self.assertEqual(next(following), entries[2])
+        stop.set()
+
+    def test_stdout_first_route_and_constrained_second_route_both_match(self):
+        entries = [
+            entry("start"),
+            entry("victron", "victron-ble.service", "stdout"),
+            {
+                **entry("container", "kasvihuone-monitor.service", "journal"),
+                "SYSLOG_IDENTIFIER": "kasvihuone-monitor",
+            },
+        ]
+        module = FakeJournalModule(entries)
+        source = JournalSource(
+            "system",
+            (
+                route(
+                    "victron-ble.service",
+                    (("_TRANSPORT", ("stdout",)),),
+                ),
+                route(
+                    "kasvihuone-monitor.service",
+                    (
+                        ("_TRANSPORT", ("journal",)),
+                        ("SYSLOG_IDENTIFIER", ("kasvihuone-monitor",)),
+                    ),
+                ),
+            ),
+            _journal_module=module,
+        )
+        source.seek_after("start")
+        stop = threading.Event()
+        following = source.follow(stop)
+        self.assertEqual(next(following), entries[1])
+        self.assertEqual(next(following), entries[2])
         stop.set()
 
     def test_repeated_unit_field_cannot_broaden_another_route(self):

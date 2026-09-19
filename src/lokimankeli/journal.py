@@ -40,6 +40,7 @@ class JournalSource:
         self._journal = journal
         self._flags = flags
         self._unit_field = unit_field
+        self._routes = {route.unit: route for route in routes}
         self._pending: dict[str, Any] | None = None
         try:
             self._reader = self._new_reader()
@@ -48,7 +49,8 @@ class JournalSource:
                     self._reader.add_disjunction()
                 self._reader.add_match(**{unit_field: route.unit})
                 for field, values in route.journal_match:
-                    self._reader.add_conjunction()
+                    if field == unit_field:
+                        continue
                     for value in values:
                         self._reader.add_match(**{field: value})
         except Exception as exc:
@@ -60,6 +62,18 @@ class JournalSource:
     def entry_unit(self, entry: dict[str, Any]) -> str | None:
         value = entry.get(self._unit_field)
         return value if isinstance(value, str) and value else None
+
+    def _matches_route(self, entry: dict[str, Any]) -> bool:
+        unit = self.entry_unit(entry)
+        route = self._routes.get(unit) if unit is not None else None
+        if route is None:
+            return False
+        for field, expected in route.journal_match:
+            actual = entry.get(field)
+            actual_values = actual if isinstance(actual, list) else [actual]
+            if not any(value in expected for value in actual_values):
+                return False
+        return True
 
     def validate_cursor(self, cursor: str) -> None:
         try:
@@ -94,12 +108,14 @@ class JournalSource:
 
     def follow(self, stop: threading.Event) -> Iterator[dict[str, Any]]:
         if self._pending is not None and not stop.is_set():
-            yield self._pending
+            if self._matches_route(self._pending):
+                yield self._pending
             self._pending = None
         while not stop.is_set():
             entry = self._reader.get_next()
             if entry:
-                yield entry
+                if self._matches_route(entry):
+                    yield entry
                 continue
             try:
                 self._reader.wait(1_000_000)
