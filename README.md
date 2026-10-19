@@ -146,6 +146,12 @@ TLS files in the same directory, allowing `ca_file`, `cert_file`, and
 `key_file` to use the relative names shown in the example
 configuration.
 
+The system unit starts after `systemd-journal-flush.service`, ensuring that
+persistent journal files are available before it validates its checkpoint.
+The reverse shutdown ordering also stops the bridge before journald relinquishes
+persistent storage, preventing it from checkpointing an entry written only to
+the volatile shutdown journal.
+
 The user unit reads its configuration from
 `%h/.config/lokimankeli/config.toml`. It reads only the current user journal
 and should set `journal.scope = "user"`.
@@ -173,6 +179,11 @@ printf '%s\n' 's=...;i=...;b=...;m=...;t=...;x=...' \
   | sudo tee /var/lib/lokimankeli/start-position >/dev/null
 sudo systemctl restart lokimankeli.service
 ```
+
+Use the same recovery after upgrading from a unit without journal-flush
+ordering if its retained checkpoint already refers to a volatile entry lost
+during an earlier reboot. The ordering change prevents future occurrences but
+cannot make that missing journal entry available again.
 
 Obtain cursors from `journalctl -o json`. Cursors are global within the
 configured journal scope and need not belong to a routed unit.

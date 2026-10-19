@@ -1,7 +1,7 @@
 [Unit]
 Description=Journal to MQTT bridge
-After=network-online.target
-Wants=network-online.target
+After=network-online.target systemd-journal-flush.service
+Wants=network-online.target systemd-journal-flush.service
 
 [Service]
 Type=simple
